@@ -7,6 +7,7 @@ from jittor.contrib import concat
 
 class ConfigS3DIS:
     feature_size = 6
+    batch_size = 6  # batch_size during training
     num_layers = 5
     num_classes = 13
     d_out = [16, 64, 128, 256, 512]  # feature dimension
@@ -16,14 +17,54 @@ class DilatedResBlock(nn.Module):
     def __init__(self, in_dim, out_dim):
         self.in_dim = in_dim
         self.out_dim = out_dim
-        build_dilated_res_block()
+        self.build_dilated_res_block()
     
-    def build_dilated_res_block():
-        self.mlp1 = nn.Conv2d(in_dim, out_dim // 2, (1,1))
+    def build_dilated_res_block(self):
+        self.mlp1 = nn.Conv2d(self.in_dim, self.out_dim // 2, (1,1))
         # building_block
+        # f_xyz = 10
+        self.mlp2 = nn.Conv2d(self.out_dim, self.out_dim * 2, (1,1))
+        self.mlp1_building_block = nn.Conv2d(10, self.out_dim // 2)
+        self.mlp_shortcut = nn.Conv2d(self.in_dim, self.out_dim * 2, (1,1))
+        self.leaky_relu = nn.LeakyReLU(0.2)
+        # TODO
 
-    def execute(self):
-        pass
+    def execute(self, feature, xyz, neigh_idx):
+        # (?,?,1,in_dim)
+        f_pc = self.mlp1(feature) # fc -> # (?,?,1,out_dim // 2) 
+        f_pc = self.building_block(xyz, f_pc, neigh_idx) # building -> (?,?,1,out_dim)
+        f_pc = self.mlp2(f_pc) # fc -> (?,?,1,2 * out_dim)
+        shortcut = self.mlp_shortcut(feature)
+        return self.leaky_relu(f_pc + shortcut)
+
+    def building_block(self, xyz, feature, neigh_idx):
+        # feature: (?,?,1, out_dim // 2)
+        d_in = self.out_dim // 2
+        f_xyz = self.relative_pos_encoding(xyz, neigh_idx) # relativePosEncoding -> (?,?,1,10)
+        f_xyz = self.mlp1_building_block(f_xyz) # fc -> (?,?,1,out_dim // 2)
+        f_neighbours = self.gather_neighbour(jt.squeeze(feature, axis=2), neigh_idx)
+        f_concat = jt.concat([f_neighbours, f_xyz], axis = -1)
+        # TODO
+
+    def relative_pos_encoding(self, xyz:jt.Var, neigh_idx:jt.Var):
+        neighbor_xyz = self.gather_neighbour(xyz, neigh_idx)
+        xyz_tile = jt.repeat(xyz.unsqueeze(2), [1, 1, neigh_idx.shape[-1], 1])
+        relative_xyz = xyz_tile - neighbor_xyz
+        relative_dis = jt.sqrt(jt.sum(relative_xyz * relative_xyz, axis=-1, keepdims=True))
+        relative_feature = jt.concat([relative_dis, relative_xyz, xyz_tile, neighbor_xyz], axis=-1)
+        return relative_feature
+    
+    @staticmethod
+    def gather_neighbour(pc, neighbor_idx):
+        # gather the coordinates or features of neighboring points
+        batch_size = pc.shape[0]
+        num_points = pc.shape[1]
+        d = pc.shape[2]
+        index_input = jt.reshape(neighbor_idx, shape=[batch_size, -1])
+        features = pc.gather(-1, index_input)
+        features = jt.reshape(features, [batch_size, num_points, neighbor_idx.shape[-1], d])
+        return features
+
 
 # TODO
 class RandomSampler(nn.Module):
@@ -45,12 +86,12 @@ class RandLANetEncoder(nn.Module):
         in_dim = 8
         for i in range(self.num_layers):
             self.dilated_res_blocks.append(
-                DilatedResBlock(in_dim, out_dims[i])
+                DilatedResBlock(in_dim, self.out_dimensions[i])
             )
             self.random_sample_blocks.append(
                 RandomSampler()
             )
-            in_dim = out_dims[i]
+            in_dim = self.out_dimensions[i]
 
     def execute(self, feature, xyz, neigh_idx, sub_idx)
         # feature: [?,?,1,8]
@@ -71,8 +112,6 @@ class RandLANetDecoder(nn.Module):
 class RandLANet(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.part_num = part_num
-        self.use_xyz = use_xyz
         self.feature_size, self.num_layers = cfg.feature_size, cfg.num_layers
         self.out_dimensions = cfg.d_out
         self.build_model()
@@ -80,7 +119,7 @@ class RandLANet(nn.Module):
     def build_model(self):
         self.fc1 = nn.Conv(self.feature_size, 8, kernel_size=1)
         self.bn = nn.BatchNorm1d(8, eps=1e-6, momentum=0.99)
-        self.leaky_relu = nn.LeakyReLU(8, 0.2)
+        self.leaky_relu = nn.LeakyReLU(0.2)
         self.encoder = RandLANetEncoder(
             num_layers = self.num_layers,
             out_dimensions = self.out_dimensions,
@@ -113,7 +152,7 @@ class RandLANet(nn.Module):
 def main():
     model = RandLANet(ConfigS3DIS)
     input_point = init.gauss([2, 1024, 3], 'float', mean=0.0)
-    input_feature = init.gauss([2, 1024, FEATURE_SIZE], 'float', mean=0.0)
+    input_feature = init.gauss([2, 1024, ConfigS3DIS.feature_size], 'float', mean=0.0)
     cls_label = init.gauss([2, 16], 'float', mean=0.0)
 
     print (input_point.shape)
