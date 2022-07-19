@@ -11,6 +11,7 @@ class ConfigS3DIS:
     num_layers = 5
     num_classes = 13
     d_out = [16, 64, 128, 256, 512]  # feature dimension
+    d_interp = [32, 128, 256, 512, 1024]
 
 class DilatedResBlock(nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -77,7 +78,7 @@ class DilatedResBlock(nn.Module):
 
     def relative_pos_encoding(self, xyz:jt.Var, neigh_idx:jt.Var):
         neighbor_xyz = self.gather_neighbour(xyz, neigh_idx)
-        xyz_tile = jt.repeat(xyz.unsqueeze(2), [1, 1, neigh_idx.shape[-1], 1])
+        xyz_tile = jt.repeat(xyz.unsqueeze(dim=2), [1, 1, neigh_idx.shape[-1], 1])
         relative_xyz = xyz_tile - neighbor_xyz
         relative_dis = jt.sqrt(jt.sum(relative_xyz * relative_xyz, axis=-1, keepdims=True))
         relative_feature = jt.concat([relative_dis, relative_xyz, xyz_tile, neighbor_xyz], axis=-1)
@@ -111,11 +112,15 @@ class RandLANetEncoder(nn.Module):
 
     def execute(self, feature, xyz, neigh_idx, sub_idx):
         # feature: [?,?,1,8]
+        f_encoder_list = []
         for i in range(self.num_layers):
             f_encoder_i = self.dilated_res_blocks[i](feature, xyz[i], neigh_idx[i])
             f_sampled_i = self.random_sample(f_encoder_i, sub_idx[i])
             feature = f_sampled_i
-        return feature
+            if i == 0:
+                f_encoder_list.append(f_encoder_i)
+            f_encoder_list.append(f_sampled_i)
+        return feature, f_encoder_list
     
     @staticmethod
     def random_sample(feature, pool_idx):
@@ -134,13 +139,49 @@ class RandLANetEncoder(nn.Module):
         pool_features = jt.reduce_max(pool_features, axis=2, keepdims=True)
         return pool_features
         
-# TODO
 class RandLANetDecoder(nn.Module):
-    def __init__(self, out_dimensions):
-        pass
+    def __init__(self, num_layers, out_dimensions):
+        self.num_layers = num_layers
+        self.out_dimensions = out_dimensions
+        self.build_decoder()
+    
+    def build_decoder(self):
+        self.conv2d_transpose = nn.ModuleList()
+        for i in range(len(self.out_dimensions)-1):
+            self.conv2d_transpose.append(
+                nn.ConvTranspose(
+                    in_channels = self.out_dimensions[-i-2] * 2 + self.out_dimensions[-i-1] * 2, 
+                    out_channels = self.out_dimensions[-i-2] * 2
+                    )
+                )
+        self.conv2d_transpose.append(
+            nn.ConvTranspose(
+                in_channels = self.out_dimensions[0] * 4,
+                out_channels = self.out_dimensions[0] * 2
+            )
+        )
 
-    def execute(self, feature, interp_idx, encoder_list):
-        pass
+    def execute(self, feature, interp_idx, f_encoder_list):
+        for j in range(self.num_layers):
+            f_interp_i = self.nearest_interpolation(feature, interp_idx[-j - 1])
+            f_decoder_i = self.conv2d_transpose[j](jt.concat([f_encoder_list[-j-2], f_interp_i], dim=3))
+            feature = f_decoder_i
+        return feature
+
+    @staticmethod
+    def nearest_interpolation(feature, interp_idx):
+        """
+        :param feature: [B, N, d] input features matrix
+        :param interp_idx: [B, up_num_points, 1] nearest neighbour index
+        :return: [B, up_num_points, d] interpolated features matrix
+        """
+        feature = jt.squeeze(feature, axis=2)
+        batch_size = interp_idx.shape[0]
+        up_num_points = interp_idx.shape[1]
+        interp_idx = jt.reshape(interp_idx, [batch_size, up_num_points])
+        interpolated_features = feature.gather(-1, interp_idx)
+        interpolated_features = interpolated_features.unsqueeze(dim=2)
+        return interpolated_features
 
 class RandLANet(nn.Module):
     def __init__(self, cfg):
@@ -157,7 +198,7 @@ class RandLANet(nn.Module):
             num_layers = self.num_layers,
             out_dimensions = self.out_dimensions,
         )
-        self.fc2 = nn.Conv2d(self.out_dimensions[4] * 2, self.out_dimensions[4] * 2, (1,1))
+        self.fc2 = nn.Conv2d(self.out_dimensions[-1] * 2, self.out_dimensions[-1] * 2, (1,1))
         self.decoder = RandLANetDecoder(
             num_layers = self.num_layers,
             out_dimensions = self.out_dimensions,
@@ -171,10 +212,10 @@ class RandLANet(nn.Module):
         # [?,?,6]
         feature = self.fc1(feature) # fc -> [?,?,8]
         feature = self.leaky_relu(self.bn(feature)) # batchNorm -> Relu -> [?,?,8]
-        feature = feature.unsqueeze(2) # ExpandDims -> [?,?,1,8]
-        feature = self.encoder(feature, xyz, neigh_idx, sub_idx) # Encoder -> [?,?,1,1024]
+        feature = feature.unsqueeze(dim=2) # ExpandDims -> [?,?,1,8]
+        feature, f_encoder_list = self.encoder(feature, xyz, neigh_idx, sub_idx) # Encoder -> [?,?,1,1024]
         feature = self.fc2(feature) # fc -> [?,?,1,1024]
-        feature = self.decoder(feature, interp_idx, encoder_list)
+        feature = self.decoder(feature, interp_idx, f_encoder_list)
         f_layer_fc1 = self.fc3(feature)
         f_layer_fc2 = self.fc4(f_layer_fc1)
         f_layer_drop = self.dropout(f_layer_fc2)
