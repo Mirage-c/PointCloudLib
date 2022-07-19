@@ -12,7 +12,6 @@ class ConfigS3DIS:
     num_classes = 13
     d_out = [16, 64, 128, 256, 512]  # feature dimension
 
-# TODO
 class DilatedResBlock(nn.Module):
     def __init__(self, in_dim, out_dim):
         self.in_dim = in_dim
@@ -25,9 +24,18 @@ class DilatedResBlock(nn.Module):
         # f_xyz = 10
         self.mlp2 = nn.Conv2d(self.out_dim, self.out_dim * 2, (1,1))
         self.mlp1_building_block = nn.Conv2d(10, self.out_dim // 2)
+        self.mlp2_building_block = nn.Conv2d(self.out_dim // 2, self.out_dim // 2)
         self.mlp_shortcut = nn.Conv2d(self.in_dim, self.out_dim * 2, (1,1))
         self.leaky_relu = nn.LeakyReLU(0.2)
-        # TODO
+        # att_pooling
+        self.att_pooling1 = nn.ModuleList()
+        self.att_pooling1.append(nn.Conv(self.out_dim, self.out_dim, kernel_size=1,bias=False))
+        self.att_pooling1.append(nn.Softmax(dim=1))
+        self.att_pooling1.append(nn.Conv2d(self.out_dim, self.out_dim // 2))
+        self.att_pooling2 = nn.ModuleList()
+        self.att_pooling2.append(nn.Conv(self.out_dim, self.out_dim, kernel_size=1,bias=False))
+        self.att_pooling2.append(nn.Softmax(dim=1))
+        self.att_pooling2.append(nn.Conv2d(self.out_dim, self.out_dim))
 
     def execute(self, feature, xyz, neigh_idx):
         # (?,?,1,in_dim)
@@ -44,7 +52,28 @@ class DilatedResBlock(nn.Module):
         f_xyz = self.mlp1_building_block(f_xyz) # fc -> (?,?,1,out_dim // 2)
         f_neighbours = self.gather_neighbour(jt.squeeze(feature, axis=2), neigh_idx)
         f_concat = jt.concat([f_neighbours, f_xyz], axis = -1)
-        # TODO
+        f_pc_agg = self.att_pooling(f_concat, self.att_pooling1) # att_pooling -> (?,?,1,out_dim // 2)
+        
+        f_xyz = self.mlp2_building_block(f_xyz) # fc -> (?,?,1,out_dim // 2)
+        f_neighbours = self.gather_neighbour(jt.squeeze(f_pc_agg, axis = 2), neigh_idx)
+        f_concat = jt.concat([f_neighbours, f_xyz], axis=-1)
+        f_pc_agg = self.att_pooling(f_concat, self.att_pooling2) # att_pooling -> (?,?,1,out_dim)
+
+        return f_pc_agg
+
+    def att_pooling(feature_set, module: nn.ModuleList):
+        batch_size = feature_set.shape[0]
+        num_points = feature_set.shape[1]
+        num_neigh = feature_set.shape[2]
+        d = feature_set.shape[3]
+        f_reshaped = jt.reshape(feature_set, shape=[-1, num_neigh, d])
+        att_activation = module[0](f_reshaped)
+        att_scores = module[1](att_activation)
+        f_agg = f_reshaped * att_scores
+        f_agg = jt.sum(f_agg, dim=1)
+        f_agg = jt.reshape(f_agg, [batch_size, num_points, 1, d])
+        f_agg = module[3](f_agg)
+        return f_agg
 
     def relative_pos_encoding(self, xyz:jt.Var, neigh_idx:jt.Var):
         neighbor_xyz = self.gather_neighbour(xyz, neigh_idx)
@@ -93,7 +122,7 @@ class RandLANetEncoder(nn.Module):
             )
             in_dim = self.out_dimensions[i]
 
-    def execute(self, feature, xyz, neigh_idx, sub_idx)
+    def execute(self, feature, xyz, neigh_idx, sub_idx):
         # feature: [?,?,1,8]
         for i in range(self.num_layers):
             f_encoder_i = self.dilated_res_blocks[i](feature, xyz, neigh_idx)
@@ -106,7 +135,7 @@ class RandLANetDecoder(nn.Module):
     def __init__(self, out_dimensions):
         pass
 
-    def execute(self, feature, interp_idx, encoder_list)
+    def execute(self, feature, interp_idx, encoder_list):
         pass
 
 class RandLANet(nn.Module):
