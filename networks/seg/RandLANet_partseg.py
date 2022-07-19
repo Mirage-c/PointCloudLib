@@ -94,15 +94,6 @@ class DilatedResBlock(nn.Module):
         features = jt.reshape(features, [batch_size, num_points, neighbor_idx.shape[-1], d])
         return features
 
-
-# TODO
-class RandomSampler(nn.Module):
-    def __init__(self):
-        pass
-    
-    def execute(self):
-        pass
-
 class RandLANetEncoder(nn.Module):
     def __init__(self, num_layers, out_dimensions):
         self.num_layers = num_layers
@@ -111,24 +102,37 @@ class RandLANetEncoder(nn.Module):
 
     def build_encoder(self):
         self.dilated_res_blocks = nn.ModuleList()
-        self.random_sample_blocks = nn.ModuleList()
         in_dim = 8
         for i in range(self.num_layers):
             self.dilated_res_blocks.append(
                 DilatedResBlock(in_dim, self.out_dimensions[i])
-            )
-            self.random_sample_blocks.append(
-                RandomSampler()
             )
             in_dim = self.out_dimensions[i]
 
     def execute(self, feature, xyz, neigh_idx, sub_idx):
         # feature: [?,?,1,8]
         for i in range(self.num_layers):
-            f_encoder_i = self.dilated_res_blocks[i](feature, xyz, neigh_idx)
-            f_sampled_i = self.random_sample_blocks[i](f_encoder_i, sub_idx)
+            f_encoder_i = self.dilated_res_blocks[i](feature, xyz[i], neigh_idx[i])
+            f_sampled_i = self.random_sample(f_encoder_i, sub_idx[i])
             feature = f_sampled_i
         return feature
+    
+    @staticmethod
+    def random_sample(feature, pool_idx):
+        """
+        :param feature: [B, N, d] input features matrix
+        :param pool_idx: [B, N', max_num] N' < N, N' is the selected position after pooling
+        :return: pool_features = [B, N', d] pooled features matrix
+        """
+        feature = jt.squeeze(feature, axis=2)
+        num_neigh = pool_idx.shape[-1]
+        d = feature.shape[-1]
+        batch_size = pool_idx.shape[0]
+        pool_idx = jt.reshape(pool_idx, [batch_size, -1])
+        pool_features = feature.gather(-1, pool_idx)
+        pool_features = jt.reshape(pool_features, [batch_size, -1, num_neigh, d])
+        pool_features = jt.reduce_max(pool_features, axis=2, keepdims=True)
+        return pool_features
         
 # TODO
 class RandLANetDecoder(nn.Module):
