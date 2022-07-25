@@ -1,4 +1,5 @@
 from jittor.dataset.dataset import Dataset
+import jittor as jt
 from pathlib import Path
 import numpy as np
 import time, pickle, glob, os
@@ -36,9 +37,12 @@ class ConfigS3DIS:
 cfg = ConfigS3DIS
 
 class S3DIS(Dataset):
-    def __init__(self, test_area_idx, partition='training'):
+    def __init__(self, test_area_idx, partition='training', shuffle=False):
+        super().__init__()
         self.name = 'S3DIS'
         self.path = DATA_DIR
+        self.batch_size = cfg.batch_size
+        self.shuffle = shuffle
         self.label_to_names = {0: 'ceiling',
                                1: 'floor',
                                2: 'wall',
@@ -83,6 +87,9 @@ class S3DIS(Dataset):
         for i, tree in enumerate(self.input_colors[self.partition]):
             self.possibility[self.partition] += [np.random.rand(tree.data.shape[0]) * 1e-3]
             self.min_possibility[self.partition] += [float(np.min(self.possibility[self.partition][-1]))]
+
+        self.total_len = num_per_epoch
+        self.drop_last = True
 
     def load_sub_sampled_clouds(self, sub_grid_size):
         tree_path = join(self.path, 'input_{:.3f}'.format(sub_grid_size))
@@ -180,6 +187,43 @@ class S3DIS(Dataset):
                     queried_idx.astype(np.int32),
                     np.array([cloud_idx], dtype=np.int32))
 
+    # Collect flat inputs
+    @staticmethod
+    def generate_flat_inputs(batch_xyz, batch_features, batch_labels, batch_pc_idx, batch_cloud_idx):
+        batch_features = jt.concat([batch_xyz, batch_features], dim=-1)
+        input_points = []
+        input_neighbors = []
+        input_pools = []
+        input_up_samples = []
+
+        for i in range(cfg.num_layers):
+            neighbour_idx = (jt.knn(batch_xyz, batch_xyz, cfg.k_n))[1]
+            sub_points = batch_xyz[:, :batch_xyz.shape[1] // cfg.sub_sampling_ratio[i], :]
+            pool_i = neighbour_idx[:, :batch_xyz.shape[1] // cfg.sub_sampling_ratio[i], :]
+            up_i = jt.knn(batch_xyz, sub_points, 1)[1]
+            input_points.append(batch_xyz)
+            input_neighbors.append(neighbour_idx)
+            input_pools.append(pool_i)
+            input_up_samples.append(up_i)
+            batch_xyz = sub_points
+
+        input_list = input_points + input_neighbors + input_pools + input_up_samples
+        # print("input points:")
+        # for x in input_points:
+        #     print(x.shape)
+        # print("input neighbors:")
+        # for x in input_neighbors:
+        #     print(x.shape)
+        # print("input pools:")
+        # for x in input_pools:
+        #     print(x.shape)
+        # print("input up samples:")
+        # for x in input_up_samples:
+        #     print(x.shape)
+        input_list += [batch_features, batch_labels, batch_pc_idx, batch_cloud_idx]
+
+        return input_list
+
 if __name__ == "__main__":
     train = S3DIS(1)
     xyz, color, labels, idx, cloud = train[0]
@@ -188,4 +232,15 @@ if __name__ == "__main__":
     print(labels.shape)
     print(idx.shape)
     print(cloud.shape)
+    for xyz, color, labels, idx, cloud in train:
+        print(xyz.shape)
+        print(color.shape)
+        print(labels.shape)
+        print(idx.shape)
+        print(cloud.shape)
+        flat_input = train.generate_flat_inputs(xyz, color, labels, idx, cloud)
+        for x in flat_input:
+            print(x.shape)
+            
+        break
     

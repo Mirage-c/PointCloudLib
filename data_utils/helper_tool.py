@@ -10,9 +10,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, 'utils'))
 
-import randlanet_utils.cpp_wrappers.cpp_subsampling.grid_subsampling as cpp_subsampling
-# import randlanet_utils.nearest_neighbors.lib.python.nearest_neighbors as nearest_neighbors
-
 class ConfigSemanticKITTI:
     k_n = 16  # KNN
     num_layers = 4  # Number of layers
@@ -152,18 +149,6 @@ class DataProcessing:
         test_file_list = np.concatenate(test_file_list, axis=0)
         return train_file_list, val_file_list, test_file_list
 
-    # @staticmethod
-    # def knn_search(support_pts, query_pts, k):
-    #     """
-    #     :param support_pts: points you have, B*N1*3
-    #     :param query_pts: points you want to know the neighbour index, B*N2*3
-    #     :param k: Number of neighbours in knn search
-    #     :return: neighbor_idx: neighboring points indexes, B*N2*k
-    #     """
-
-    #     neighbor_idx = nearest_neighbors.knn_batch(support_pts, query_pts, k, omp=True)
-    #     return neighbor_idx.astype(np.int32)
-
     @staticmethod
     def data_aug(xyz, color, labels, idx, num_out):
         num_in = len(xyz)
@@ -190,28 +175,6 @@ class DataProcessing:
         np.random.shuffle(indices)
         data_list = data_list[indices]
         return data_list
-
-    @staticmethod
-    def grid_sub_sampling(points, features=None, labels=None, grid_size=0.1, verbose=0):
-        """
-        CPP wrapper for a grid sub_sampling (method = barycenter for points and features
-        :param points: (N, 3) matrix of input points
-        :param features: optional (N, d) matrix of features (floating number)
-        :param labels: optional (N,) matrix of integer labels
-        :param grid_size: parameter defining the size of grid voxels
-        :param verbose: 1 to display
-        :return: sub_sampled points, with features and/or labels depending of the input
-        """
-
-        if (features is None) and (labels is None):
-            return cpp_subsampling.compute(points, sampleDl=grid_size, verbose=verbose)
-        elif labels is None:
-            return cpp_subsampling.compute(points, features=features, sampleDl=grid_size, verbose=verbose)
-        elif features is None:
-            return cpp_subsampling.compute(points, classes=labels, sampleDl=grid_size, verbose=verbose)
-        else:
-            return cpp_subsampling.compute(points, features=features, classes=labels, sampleDl=grid_size,
-                                           verbose=verbose)
 
     @staticmethod
     def IoU_from_confusions(confusions):
