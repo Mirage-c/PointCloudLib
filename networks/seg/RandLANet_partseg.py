@@ -255,17 +255,19 @@ class RandLANet(nn.Module):
         x = self.mlp(x)
 
         # <<<<<<<<<< DECODER
-        for mlp in self.decoder:
+        for i, mlp in enumerate(self.decoder):
+            print(coords[:,:N//decimation_ratio].shape, coords[:,:d*N//decimation_ratio].shape)
             _, neighbors = jt.knn(
-                coords[:,:N//decimation_ratio], # original set
                 coords[:,:d*N//decimation_ratio], # upsampled set
+                coords[:,:N//decimation_ratio], # original set
                 1
             ) # shape (B, N, 1)
-
+            print(_.shape)
+            print("at iteration {}, neighbors.shape = ".format(i), neighbors.shape)
             extended_neighbors = neighbors.unsqueeze(1).expand(-1, x.size(1), -1, 1)
 
             x_neighbors = jt.gather(x, -2, extended_neighbors)
-
+            print("at iteration {}, x_neighbors.shape = ".format(i), x_neighbors.shape)
             x = jt.concat((x_neighbors, x_stack.pop()), dim=1)
 
             x = mlp(x)
@@ -274,7 +276,9 @@ class RandLANet(nn.Module):
 
         # >>>>>>>>>> DECODER
         # inverse permutation
-        x = x[:,:,jt.argsort(permutation)]
+        print(x.shape)
+        print(permutation)
+        x = x[:,:,jt.argsort(permutation)[1]]
 
         scores = self.fc_end(x)
 
