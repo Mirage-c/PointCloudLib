@@ -2,6 +2,7 @@ import jittor as jt
 import jittor.nn as nn
 from jittor import init
 from jittor.contrib import concat 
+from jittor_utils import auto_diff
 
 class SharedMLP(nn.Module):
     def __init__(
@@ -174,7 +175,7 @@ class RandLANet(nn.Module):
         self.num_neighbors = num_neighbors
         self.decimation = decimation
 
-        self.fc_start = nn.Linear(d_in, 8)
+        self.fc_start = nn.Linear(d_in, 8, bias=True)
         self.bn_start = nn.Sequential(
             nn.BatchNorm2d(8, eps=1e-6, momentum=0.99),
             nn.LeakyReLU(0.2)
@@ -196,11 +197,16 @@ class RandLANet(nn.Module):
             bn=True,
             activation_fn=nn.ReLU()
         )
+        decoder_kwargs_2 = dict(
+            transpose=True,
+            bn=True,
+            activation_fn=None
+        )
         self.decoder = nn.ModuleList([
             SharedMLP(1024, 256, **decoder_kwargs),
-            SharedMLP(512, 128, **decoder_kwargs),
-            SharedMLP(256, 32, **decoder_kwargs),
-            SharedMLP(64, 8, **decoder_kwargs)
+            SharedMLP(512, 128, **decoder_kwargs_2),
+            SharedMLP(256, 32, **decoder_kwargs_2),
+            SharedMLP(64, 8, **decoder_kwargs_2)
         ])
 
         # final semantic prediction
@@ -230,11 +236,13 @@ class RandLANet(nn.Module):
         d = self.decimation
 
         coords = input[...,:3].clone()
+        print("before fc_start: ", input)
         x = self.fc_start(input).transpose(-2,-1).unsqueeze(-1)
+        print("after fc_start: ", x)
         x = self.bn_start(x) # shape (B, d, N, 1)
 
         decimation_ratio = 1
-        print("before encoder: ", x.shape)
+        print("before encoder: ", x)
         # <<<<<<<<<< ENCODER
         x_stack = []
 
@@ -287,15 +295,17 @@ class RandLANet(nn.Module):
 
 if __name__ == '__main__':
     import time
-
+    jt.set_global_seed(1)
     d_in = 7
     cloud = 1000* jt.randn(1, 2**16, d_in)
+    # print("cloud:", cloud)
+    hook = auto_diff.Hook("RandLA")
     model = RandLANet(d_in, 6, 16, 4)
     # model.load_state_dict(jt.load('checkpoints/checkpoint_100.pth'))
     model.eval()
-
-    t0 = time.time()
-    pred = model(cloud)
-    t1 = time.time()
-    print(pred.shape)
-    print(t1-t0)
+    hook.hook_module(model)
+    # t0 = time.time()
+    # pred = model(cloud)
+    # t1 = time.time()
+    # print("pred:", pred)
+    # print("time:", t1-t0)
