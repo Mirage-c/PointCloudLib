@@ -3,6 +3,7 @@
 import os
 import sys 
 from data_utils.shapenet_loader import ShapeNetPart
+from data_utils.s3dis_loader import S3DIS
 import numpy as np
 import sklearn.metrics as metrics
 from misc.utils import LRScheduler
@@ -11,6 +12,7 @@ from networks.seg.pointnet2_partseg import PointNet2_partseg
 from networks.seg.pointconv_partseg import PointConvDensity_partseg
 from networks.seg.dgcnn_partseg import DGCNN_partseg
 from networks.seg.pointcnn_partseg import PointCNN_partseg
+from networks.seg.randlanet_partseg import RandLANet
 
 import time 
 
@@ -65,10 +67,13 @@ def calculate_shape_IoU(pred_np, seg_np, label, class_choice):
 
 def train(model, args):
     batch_size = 16
-    train_loader = ShapeNetPart(partition='trainval', num_points=2048, class_choice=None, batch_size=batch_size, shuffle=True)
-    test_loader = ShapeNetPart(partition='test', num_points=2048, class_choice=None, batch_size=batch_size, shuffle=False)
-    
-    seg_num_all = 50
+    if not args.model == 'randlanet':
+        train_loader = ShapeNetPart(partition='trainval', num_points=2048, class_choice=None, batch_size=batch_size, shuffle=True)
+        test_loader = ShapeNetPart(partition='test', num_points=2048, class_choice=None, batch_size=batch_size, shuffle=False)
+    else:
+        train_loader = S3DIS(1, partition='trainval')
+        test_loader = S3DIS(1, partition='test')
+    seg_num_all = 50 if not args.model == 'randlanet' else 13
     seg_start_index = 0
 
     print(str(model))
@@ -98,23 +103,26 @@ def train(model, args):
             # with jt.profile_scope() as report:
             
             seg = seg - seg_start_index
-            label_one_hot = np.zeros((label.shape[0], 16))
-            # print (label.size())
-            for idx in range(label.shape[0]):
-                label_one_hot[idx, label.numpy()[idx,0]] = 1
-            label_one_hot = jt.array(label_one_hot.astype(np.float32))
+            if not args.model == 'randlanet':
+                label_one_hot = np.zeros((label.shape[0], 16))
+                # print (label.size())
+                for idx in range(label.shape[0]):
+                    label_one_hot[idx, label.numpy()[idx,0]] = 1
+                label_one_hot = jt.array(label_one_hot.astype(np.float32))
             if args.model == 'pointnet' or args.model == 'dgcnn':            
                 data = data.permute(0, 2, 1) # for pointnet it should not be committed 
             batch_size = data.size()[0]
             if args.model == 'pointnet2':
                 seg_pred = model(data, data, label_one_hot)
-            else :
+            elif args.model == 'randlanet' :
+                seg_pred = model(data)
+            else:
                 seg_pred = model(data, label_one_hot)
             seg_pred = seg_pred.permute(0, 2, 1)
             # print (seg_pred.size())
             # print (seg_pred.size(), seg.size())
             loss = nn.cross_entropy_loss(seg_pred.view(-1, seg_num_all), seg.view(-1))
-            # print (loss.data)
+            # print(loss.data)
             optimizer.step(loss)
 
             pred = jt.argmax(seg_pred, dim=2)[0]               # (batch_size, num_points)
@@ -221,7 +229,7 @@ if __name__ == "__main__":
     # Training settings    
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--model', type=str, default='[pointnet]', metavar='N',
-                        choices=['pointnet', 'pointnet2', 'pointcnn', 'dgcnn', 'pointconv'],
+                        choices=['pointnet', 'pointnet2', 'pointcnn', 'dgcnn', 'pointconv', 'randlanet'],
                         help='Model to use')
     parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
                         help='Size of batch)')
@@ -247,6 +255,8 @@ if __name__ == "__main__":
         model = DGCNN_partseg(part_num=50)
     elif args.model == 'pointconv':
         model = PointConvDensity_partseg(part_num=50)
+    elif args.model == 'randlanet':
+        model = RandLANet(6,13)
     else:
         raise Exception("Not implemented")
 

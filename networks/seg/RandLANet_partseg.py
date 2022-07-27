@@ -4,6 +4,7 @@ from jittor import init, knn
 from jittor.contrib import concat 
 from jittor_utils import auto_diff
 
+
 class SharedMLP(nn.Module):
     def __init__(
         self,
@@ -197,11 +198,6 @@ class RandLANet(nn.Module):
             bn=True,
             activation_fn=nn.ReLU()
         )
-        decoder_kwargs_2 = dict(
-            transpose=True,
-            bn=True,
-            activation_fn=None
-        )
         self.decoder = nn.ModuleList([
             SharedMLP(1024, 256, **decoder_kwargs),
             SharedMLP(512, 128, **decoder_kwargs),
@@ -246,7 +242,7 @@ class RandLANet(nn.Module):
         x = x[:,:,permutation]
 
         for i, lfa in enumerate(self.encoder):
-            print("at iteration {}, x.shape = ".format(i), x.shape) # (B, N//(d**i), d_in)
+            # print("at iteration {}, x.shape = ".format(i), x.shape) # (B, N//(d**i), d_in)
             x = lfa(coords[:,:N//decimation_ratio], x)
             x_stack.append(x.clone())
             decimation_ratio *= d
@@ -259,18 +255,18 @@ class RandLANet(nn.Module):
 
         # <<<<<<<<<< DECODER
         for i, mlp in enumerate(self.decoder):
-            print(coords[:,:N//decimation_ratio].shape, coords[:,:d*N//decimation_ratio].shape)
+            # print(coords[:,:N//decimation_ratio].shape, coords[:,:d*N//decimation_ratio].shape)
             _, neighbors = jt.knn(
                 coords[:,:d*N//decimation_ratio], # upsampled set
                 coords[:,:N//decimation_ratio], # original set
                 1
             ) # shape (B, N, 1)
-            print(_.shape)
-            print("at iteration {}, neighbors.shape = ".format(i), neighbors.shape)
+            # print(_.shape)
+            # print("at iteration {}, neighbors.shape = ".format(i), neighbors.shape)
             extended_neighbors = neighbors.unsqueeze(1).expand(-1, x.size(1), -1, 1)
 
             x_neighbors = jt.gather(x, -2, extended_neighbors)
-            print("at iteration {}, x_neighbors.shape = ".format(i), x_neighbors.shape)
+            # print("at iteration {}, x_neighbors.shape = ".format(i), x_neighbors.shape)
             x = jt.concat((x_neighbors, x_stack.pop()), dim=1)
 
             x = mlp(x)
@@ -279,8 +275,8 @@ class RandLANet(nn.Module):
 
         # >>>>>>>>>> DECODER
         # inverse permutation
-        print(x.shape)
-        print(permutation)
+        # print(x.shape)
+        # print(permutation)
         x = x[:,:,jt.argsort(permutation)[0]]
 
         scores = self.fc_end(x)
@@ -288,7 +284,7 @@ class RandLANet(nn.Module):
         return scores.squeeze(-1)
 
 
-if __name__ == '__main__':
+def hook():
     import time
     jt.set_global_seed(1)
     d_in = 7
@@ -306,3 +302,6 @@ if __name__ == '__main__':
     # t1 = time.time()
     # print("pred:", pred)
     # print("time:", t1-t0)
+
+if __name__ == '__main__':
+    hook()

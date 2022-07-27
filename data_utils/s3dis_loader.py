@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import time, pickle, glob, os
 from os.path import join
-from helper_ply import read_ply
-from helper_tool import DataProcessing as DP
+from data_utils.helper_ply import read_ply
+from data_utils.helper_tool import DataProcessing as DP
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = os.path.join(BASE_DIR, 'data/S3DIS')
@@ -37,7 +37,7 @@ class ConfigS3DIS:
 cfg = ConfigS3DIS
 
 class S3DIS(Dataset):
-    def __init__(self, test_area_idx, partition='training', shuffle=False):
+    def __init__(self, test_area_idx, partition='trainval', shuffle=False):
         super().__init__()
         self.name = 'S3DIS'
         self.path = DATA_DIR
@@ -75,11 +75,13 @@ class S3DIS(Dataset):
         self.input_labels = {'training': [], 'validation': []}
         self.input_names = {'training': [], 'validation': []}
         self.load_sub_sampled_clouds(cfg.sub_grid_size)
-        self.partition = partition
-        if partition == 'training':
+        
+        if partition == 'trainval':
             num_per_epoch = cfg.train_steps * cfg.batch_size
-        elif partition == 'validation':
+            self.partition = 'training'
+        elif partition == 'test':
             num_per_epoch = cfg.val_steps * cfg.val_batch_size
+            self.partition = 'validation'
         
         self.possibility[self.partition] = []
         self.min_possibility[self.partition] = []
@@ -91,6 +93,7 @@ class S3DIS(Dataset):
         self.total_len = num_per_epoch
         self.num_per_epoch = num_per_epoch
         self.drop_last = True
+        self.generator = self.spatially_regular_gen()
 
     def load_sub_sampled_clouds(self, sub_grid_size):
         tree_path = join(self.path, 'input_{:.3f}'.format(sub_grid_size))
@@ -139,7 +142,8 @@ class S3DIS(Dataset):
                 print('{:s} done in {:.1f}s'.format(cloud_name, time.time() - t0))
 
     def __getitem__(self, index):
-        return self.spatially_regular_gen()
+        data, labels, seg = next(self.generator)
+        return data, labels, seg
         
     def spatially_regular_gen(self):
         for i in range(self.num_per_epoch):
@@ -186,11 +190,13 @@ class S3DIS(Dataset):
                 queried_pc_xyz, queried_pc_colors, queried_idx, queried_pc_labels = \
                     DP.data_aug(queried_pc_xyz, queried_pc_colors, queried_pc_labels, queried_idx, cfg.num_points)
 
-            return (queried_pc_xyz.astype(np.float32),
-                        queried_pc_colors.astype(np.float32),
-                        queried_pc_labels,
-                        queried_idx.astype(np.int32),
-                        np.array([cloud_idx], dtype=np.int32))
+            # yield (queried_pc_xyz.astype(np.float32),
+            #             queried_pc_colors.astype(np.float32),
+            #             queried_pc_labels,
+            #             queried_idx.astype(np.int32),
+            #             np.array([cloud_idx], dtype=np.int32))
+            yield jt.concat([queried_pc_xyz.astype(np.float32), queried_pc_colors.astype(np.float32)], 1), np.array([cloud_idx], dtype=np.int32), queried_pc_labels
+
     # Collect flat inputs
     @staticmethod
     def generate_flat_inputs(batch_xyz, batch_features, batch_labels, batch_pc_idx, batch_cloud_idx):
