@@ -1,6 +1,6 @@
 import jittor as jt
 import jittor.nn as nn
-from jittor import init
+from jittor import init, knn
 from jittor.contrib import concat 
 from jittor_utils import auto_diff
 
@@ -70,7 +70,7 @@ class LocalSpatialEncoding(nn.Module):
             jt.Tensor, shape (B, 2*d, N, K)
         """
         # finding neighboring points
-        dist, idx = knn_output
+        idx, dist = knn_output
         B, N, K = idx.size()
         # idx(B, N, K), coords(B, N, 3)
         # neighbors[b, i, n, k] = coords[b, idx[b, n, k], i] = extended_coords[b, i, extended_idx[b, i, n, k], k]
@@ -157,7 +157,7 @@ class LocalFeatureAggregation(nn.Module):
             jt.Tensor, shape (B, 2*d_out, N, 1)
         """
         knn_output = jt.knn(coords, coords, self.num_neighbors)
-
+        knn_output = (knn_output[1], knn_output[0])
         x = self.mlp1(features)
 
         x = self.lse1(coords, x, knn_output)
@@ -204,9 +204,9 @@ class RandLANet(nn.Module):
         )
         self.decoder = nn.ModuleList([
             SharedMLP(1024, 256, **decoder_kwargs),
-            SharedMLP(512, 128, **decoder_kwargs_2),
-            SharedMLP(256, 32, **decoder_kwargs_2),
-            SharedMLP(64, 8, **decoder_kwargs_2)
+            SharedMLP(512, 128, **decoder_kwargs),
+            SharedMLP(256, 32, **decoder_kwargs),
+            SharedMLP(64, 8, **decoder_kwargs)
         ])
 
         # final semantic prediction
@@ -231,18 +231,13 @@ class RandLANet(nn.Module):
             jt.Tensor, shape (B, num_classes, N)
                 segmentation scores for each point
         """
-        print("input shape: ", input.shape)
         N = input.size(1)
         d = self.decimation
 
         coords = input[...,:3].clone()
-        print("before fc_start: ", input)
         x = self.fc_start(input).transpose(-2,-1).unsqueeze(-1)
-        print("after fc_start: ", x)
         x = self.bn_start(x) # shape (B, d, N, 1)
-
         decimation_ratio = 1
-        print("before encoder: ", x)
         # <<<<<<<<<< ENCODER
         x_stack = []
 
@@ -286,7 +281,7 @@ class RandLANet(nn.Module):
         # inverse permutation
         print(x.shape)
         print(permutation)
-        x = x[:,:,jt.argsort(permutation)[1]]
+        x = x[:,:,jt.argsort(permutation)[0]]
 
         scores = self.fc_end(x)
 
@@ -298,12 +293,14 @@ if __name__ == '__main__':
     jt.set_global_seed(1)
     d_in = 7
     cloud = 1000* jt.randn(1, 2**16, d_in)
-    # print("cloud:", cloud)
-    hook = auto_diff.Hook("RandLA")
     model = RandLANet(d_in, 6, 16, 4)
+
+
     # model.load_state_dict(jt.load('checkpoints/checkpoint_100.pth'))
     model.eval()
+    hook = auto_diff.Hook("RandLA")
     hook.hook_module(model)
+    print("cloud:", cloud)
     # t0 = time.time()
     pred = model(cloud)
     # t1 = time.time()
