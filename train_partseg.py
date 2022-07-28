@@ -13,13 +13,12 @@ from networks.seg.pointconv_partseg import PointConvDensity_partseg
 from networks.seg.dgcnn_partseg import DGCNN_partseg
 from networks.seg.pointcnn_partseg import PointCNN_partseg
 from networks.seg.randlanet_partseg import RandLANet
-
+import torch
 import time 
 
 # jittor related 
 import jittor as jt 
-from jittor import nn 
-
+from jittor import nn
 import argparse
 
 jt.flags.use_cuda = 1
@@ -64,6 +63,36 @@ def calculate_shape_IoU(pred_np, seg_np, label, class_choice):
 
     return shape_ious
 
+def intersection_over_union(scores, labels):
+    r"""
+        Compute the per-class IoU and the mean IoU # TODO: complete doc
+
+        Parameters
+        ----------
+        scores: torch.FloatTensor, shape (B?, C, N)
+            raw scores for each class
+        labels: torch.LongTensor, shape (B?, N)
+            ground truth labels
+
+        Returns
+        -------
+        list of floats of length num_classes+1 (last item is mIoU)
+    """
+    num_classes = scores.size(-2) # we use -2 instead of 1 to enable arbitrary batch dimensions
+    # print(scores.shape)
+    predictions = jt.argmax(scores, dim=1)[0]
+    # print(predictions.shape)
+    # print(labels.shape)
+    ious = []
+
+    for label in range(num_classes):
+        pred_mask = predictions == label
+        labels_mask = labels == label
+        iou = (pred_mask & labels_mask).float().sum() / (pred_mask | labels_mask).float().sum()
+        ious.append(iou)
+    ious.append(np.nanmean(ious))
+    return ious
+
 
 def train(model, args):
     batch_size = 16
@@ -97,11 +126,12 @@ def train(model, args):
         train_true_seg = []
         train_pred_seg = []
         train_label_seg = []
-
+        if args.model == 'randlanet':
+            ious = []
+        print("##### Epoch {} #####".format(epoch))
         # debug = 0
         for data, label, seg in train_loader:
             # with jt.profile_scope() as report:
-            
             seg = seg - seg_start_index
             if not args.model == 'randlanet':
                 label_one_hot = np.zeros((label.shape[0], 16))
@@ -115,7 +145,8 @@ def train(model, args):
             if args.model == 'pointnet2':
                 seg_pred = model(data, data, label_one_hot)
             elif args.model == 'randlanet' :
-                seg_pred = model(data)
+                seg_pred = model(data)            
+                ious.append(intersection_over_union(seg_pred, seg))
             else:
                 seg_pred = model(data, label_one_hot)
             seg_pred = seg_pred.permute(0, 2, 1)
@@ -142,13 +173,11 @@ def train(model, args):
             temp_label = label.reshape(-1, 1)
         
             train_label_seg.append(temp_label)
-        
             # print(report)
         train_true_cls = np.concatenate(train_true_cls)
         train_pred_cls = np.concatenate(train_pred_cls)
         # print (train_true_cls.shape ,train_pred_cls.shape)
         train_acc = metrics.accuracy_score(train_true_cls, train_pred_cls)
-
         avg_per_class_acc = metrics.balanced_accuracy_score(train_true_cls.data, train_pred_cls.data)
         # print ('train acc =',train_acc, 'avg_per_class_acc', avg_per_class_acc)
         train_true_seg = np.concatenate(train_true_seg, axis=0)
@@ -158,7 +187,10 @@ def train(model, args):
         # print (train_label_seg[0])
         train_label_seg = np.concatenate(train_label_seg, axis=0)
         # print (train_pred_seg.shape, train_true_seg.shape, train_label_seg.shape)
-        train_ious = calculate_shape_IoU(train_pred_seg, train_true_seg, train_label_seg, None)
+        if not args.model == 'randlanet':
+            train_ious = calculate_shape_IoU(train_pred_seg, train_true_seg, train_label_seg, None)
+        else:
+            train_ious = np.nanmean(np.array(ious), axis=0)
         outstr = 'Train %d, loss: %.6f, train acc: %.6f, train avg acc: %.6f, train iou: %.6f' % (epoch, 
                                                                                                   train_loss*1.0/count,
                                                                                                   train_acc,
@@ -177,17 +209,23 @@ def train(model, args):
         test_true_seg = []
         test_pred_seg = []
         test_label_seg = []
+        if args.model == 'randlanet':
+            ious = []
         for data, label, seg in test_loader:
             seg = seg - seg_start_index
-            label_one_hot = np.zeros((label.shape[0], 16))
-            for idx in range(label.shape[0]):
-                label_one_hot[idx, label.numpy()[idx,0]] = 1
-            label_one_hot = jt.array(label_one_hot.astype(np.float32))
+            if not args.model == 'randlanet':
+                label_one_hot = np.zeros((label.shape[0], 16))
+                for idx in range(label.shape[0]):
+                    label_one_hot[idx, label.numpy()[idx,0]] = 1
+                label_one_hot = jt.array(label_one_hot.astype(np.float32))
             if args.model == 'pointnet' or args.model == 'dgcnn':            
                 data = data.permute(0, 2, 1) # for pointnet it should not be committed 
             batch_size = data.size()[0]
             if args.model == 'pointnet2':
                 seg_pred = model(data, data, label_one_hot)
+            elif args.model == 'randlanet':
+                seg_pred = model(data)
+                ious.append(intersection_over_union(seg_pred, seg))
             else :
                 seg_pred = model(data, label_one_hot)
             seg_pred = seg_pred.permute(0, 2, 1)
@@ -211,7 +249,10 @@ def train(model, args):
         test_true_seg = np.concatenate(test_true_seg, axis=0)
         test_pred_seg = np.concatenate(test_pred_seg, axis=0)
         test_label_seg = np.concatenate(test_label_seg)
-        test_ious = calculate_shape_IoU(test_pred_seg, test_true_seg, test_label_seg, None)
+        if not args.model == 'randlanet':
+            test_ious = calculate_shape_IoU(test_pred_seg, test_true_seg, test_label_seg, None)
+        else:
+            test_ious = np.nanmean(np.array(ious), axis=0)
         outstr = 'Test %d, loss: %.6f, test acc: %.6f, test avg acc: %.6f, test iou: %.6f' % (epoch,
                                                                                               test_loss*1.0/count,
                                                                                               test_acc,
@@ -219,6 +260,9 @@ def train(model, args):
                                                                                               np.mean(test_ious))
         print (outstr)
         # io.cprint(outstr)
+        if np.mean(test_ious) >= best_test_iou:
+            best_test_iou = np.mean(test_ious)
+            jt.save(model.state_dict(), 'checkpoints/randlanet/models/model.t7')
         # if np.mean(test_ious) >= best_test_iou:
         #     best_test_iou = np.mean(test_ious)
         #     torch.save(model.state_dict(), 'checkpoints/%s/models/model.t7' % args.exp_name)

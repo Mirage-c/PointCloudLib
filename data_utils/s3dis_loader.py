@@ -144,9 +144,10 @@ class S3DIS(Dataset):
     def __getitem__(self, index):
         data, labels, seg = next(self.generator)
         return data, labels, seg
-        
+    
     def spatially_regular_gen(self):
-        for i in range(self.num_per_epoch):
+        # for i in range(self.num_per_epoch):
+        while True:
             # Choose the cloud with the lowest probability
             cloud_idx = int(np.argmin(self.min_possibility[self.partition]))
 
@@ -195,7 +196,7 @@ class S3DIS(Dataset):
             #             queried_pc_labels,
             #             queried_idx.astype(np.int32),
             #             np.array([cloud_idx], dtype=np.int32))
-            yield jt.concat([queried_pc_xyz.astype(np.float32), queried_pc_colors.astype(np.float32)], 1), np.array([cloud_idx], dtype=np.int32), queried_pc_labels
+            yield jt.concat([queried_pc_xyz.astype(np.float32), queried_pc_colors.astype(np.float32)], 1), self.label_values, queried_pc_labels
 
     # Collect flat inputs
     @staticmethod

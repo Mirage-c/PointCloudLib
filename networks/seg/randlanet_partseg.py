@@ -1,7 +1,5 @@
 import jittor as jt
 import jittor.nn as nn
-from jittor import init, knn
-from jittor.contrib import concat 
 from jittor_utils import auto_diff
 
 
