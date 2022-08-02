@@ -1,3 +1,4 @@
+from random import sample
 import jittor as jt
 # OS functions
 from os import listdir
@@ -280,13 +281,14 @@ class ModelNet40Dataset():
         """
         return self.num_models
 
-    def __getitem__(self, idx):
-
-        idx_list = [idx]
+    def __getitem__(self, idx_list):
 
         ###################
         # Gather batch data
         ###################
+
+        if isinstance(idx_list, int):
+            idx_list = [idx_list]
 
         tp_list = []
         tn_list = []
@@ -296,7 +298,6 @@ class ModelNet40Dataset():
         R_list = []
 
         for p_i in idx_list:
-
             # Get points and labels
             points = self.input_points[p_i].astype(np.float32)
             normals = self.input_normals[p_i].astype(np.float32)
@@ -722,7 +723,7 @@ class ModelNet40Sampler():
         """
         return None
 
-    def calibration(self, dataloader, untouched_ratio=0.9, verbose=False):
+    def calibration(self, verbose=False):
         """
         Method performing batch and neighbors calibration.
             Batch calibration: Set "batch_limit" (the maximum number of points allowed in every batch) so that the
@@ -819,144 +820,8 @@ class ModelNet40Sampler():
                 print('{:}\"{:s}\": {:s}{:}'.format(color, key, v, bcolors.ENDC))
 
         if redo:
-
-            ############################
-            # Neighbors calib parameters
-            ############################
-
-            # From config parameter, compute higher bound of neighbors number in a neighborhood
-            hist_n = int(np.ceil(4 / 3 * np.pi * (self.dataset.config.conv_radius + 1) ** 3))
-
-            # Histogram of neighborhood sizes
-            neighb_hists = np.zeros((self.dataset.config.num_layers, hist_n), dtype=np.int32)
-
-            ########################
-            # Batch calib parameters
-            ########################
-
-            # Estimated average batch size and target value
-            estim_b = 0
-            target_b = self.dataset.config.batch_num
-
-            # Calibration parameters
-            low_pass_T = 10
-            Kp = 100.0
-            finer = False
-
-            # Convergence parameters
-            smooth_errors = []
-            converge_threshold = 0.1
-
-            # Loop parameters
-            last_display = time.time()
-            i = 0
-            breaking = False
-
-            #####################
-            # Perform calibration
-            #####################
-
-            for epoch in range(10):
-                for batch_i, batch in enumerate(dataloader):
-
-                    # Update neighborhood histogram
-                    counts = [np.sum(neighb_mat.numpy() < neighb_mat.shape[0], axis=1) for neighb_mat in batch.neighbors]
-                    hists = [np.bincount(c, minlength=hist_n)[:hist_n] for c in counts]
-                    neighb_hists += np.vstack(hists)
-
-                    # batch length
-                    b = len(batch.labels)
-
-                    # Update estim_b (low pass filter)
-                    estim_b += (b - estim_b) / low_pass_T
-
-                    # Estimate error (noisy)
-                    error = target_b - b
-
-                    # Save smooth errors for convergene check
-                    smooth_errors.append(target_b - estim_b)
-                    if len(smooth_errors) > 10:
-                        smooth_errors = smooth_errors[1:]
-
-                    # Update batch limit with P controller
-                    self.batch_limit += Kp * error
-
-                    # finer low pass filter when closing in
-                    if not finer and np.abs(estim_b - target_b) < 1:
-                        low_pass_T = 100
-                        finer = True
-
-                    # Convergence
-                    if finer and np.max(np.abs(smooth_errors)) < converge_threshold:
-                        breaking = True
-                        break
-
-                    i += 1
-                    t = time.time()
-
-                    # Console display (only one per second)
-                    if verbose and (t - last_display) > 1.0:
-                        last_display = t
-                        message = 'Step {:5d}  estim_b ={:5.2f} batch_limit ={:7d}'
-                        print(message.format(i,
-                                             estim_b,
-                                             int(self.batch_limit)))
-
-                if breaking:
-                    break
-
-            # Use collected neighbor histogram to get neighbors limit
-            cumsum = np.cumsum(neighb_hists.T, axis=0)
-            percentiles = np.sum(cumsum < (untouched_ratio * cumsum[hist_n - 1, :]), axis=0)
-            self.dataset.neighborhood_limits = percentiles
-
-            if verbose:
-
-                # Crop histogram
-                while np.sum(neighb_hists[:, -1]) == 0:
-                    neighb_hists = neighb_hists[:, :-1]
-                hist_n = neighb_hists.shape[1]
-
-                print('\n**************************************************\n')
-                line0 = 'neighbors_num '
-                for layer in range(neighb_hists.shape[0]):
-                    line0 += '|  layer {:2d}  '.format(layer)
-                print(line0)
-                for neighb_size in range(hist_n):
-                    line0 = '     {:4d}     '.format(neighb_size)
-                    for layer in range(neighb_hists.shape[0]):
-                        if neighb_size > percentiles[layer]:
-                            color = bcolors.FAIL
-                        else:
-                            color = bcolors.OKGREEN
-                        line0 += '|{:}{:10d}{:}  '.format(color,
-                                                         neighb_hists[layer, neighb_size],
-                                                         bcolors.ENDC)
-
-                    print(line0)
-
-                print('\n**************************************************\n')
-                print('\nchosen neighbors limits: ', percentiles)
-                print()
-
-            # Save batch_limit dictionary
-            key = '{:.3f}_{:d}'.format(self.dataset.config.first_subsampling_dl,
-                                       self.dataset.config.batch_num)
-            batch_lim_dict[key] = self.batch_limit
-            with open(batch_lim_file, 'wb') as file:
-                pickle.dump(batch_lim_dict, file)
-
-            # Save neighb_limit dictionary
-            for layer_ind in range(self.dataset.config.num_layers):
-                dl = self.dataset.config.first_subsampling_dl * (2 ** layer_ind)
-                if self.dataset.config.deform_layers[layer_ind]:
-                    r = dl * self.dataset.config.deform_radius
-                else:
-                    r = dl * self.dataset.config.conv_radius
-                key = '{:.3f}_{:.3f}'.format(dl, r)
-                neighb_lim_dict[key] = self.dataset.neighborhood_limits[layer_ind]
-            with open(neighb_lim_file, 'wb') as file:
-                pickle.dump(neighb_lim_dict, file)
+            print("Redo needed, exit!")
+            exit(0)
 
 
         print('Calibration done in {:.1f}s\n'.format(time.time() - t0))
@@ -1548,7 +1413,17 @@ if __name__ == "__main__":
     
     cfg = Modelnet40Config()
     training_dataset = ModelNet40Dataset(cfg, train=True)
-    for data in training_dataset:
-        for x in data:
+    training_sampler = ModelNet40Sampler(training_dataset, balance_labels=True)
+    training_sampler.calibration()
+    # print("### original data ###")
+    # for data in training_dataset:
+    #     for x in data:
+    #         print(x.shape)
+    #     break
+    print("### sampled data ###")
+    for sampled_idx in training_sampler:
+        sampled_data = training_dataset.__getitem__(sampled_idx)
+        # print(sampled_data)
+        for x in sampled_data:
             print(x.shape)
-        exit(0)
+        break
