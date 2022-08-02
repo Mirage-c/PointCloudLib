@@ -241,40 +241,42 @@ def main():
     sub_sampling_ratio = [4, 4, 4, 4, 2]  # sampling ratio of random sampling at each layer
     num_layers = cfg.num_layers
 
-    batch_xyz = init.gauss([6,40960,3], 'int32', mean=0)
-    batch_features = init.gauss([6,40960,3], 'float32', mean=0.0)
-    batch_labels = init.gauss([6,40960], 'int32', mean=0)
-    batch_pc_idx = init.gauss([6,40960], 'int32', mean=0)
-    batch_cloud_idx = init.gauss([6,1], 'int32', mean=0)
+    for j in range(500):
+        batch_xyz = init.gauss([6,40960,3], 'int32', mean=0)
+        batch_features = init.gauss([6,40960,3], 'float32', mean=0.0)
+        batch_labels = init.gauss([6,40960], 'int32', mean=0)
+        batch_pc_idx = init.gauss([6,40960], 'int32', mean=0)
+        batch_cloud_idx = init.gauss([6,1], 'int32', mean=0)
 
-    batch_features = jt.concat([batch_xyz, batch_features], dim=-1)
-    input_points = []
-    input_neighbors = []
-    input_pools = []
-    input_up_samples = []
+        batch_features = jt.concat([batch_xyz, batch_features], dim=-1)
+        input_points = []
+        input_neighbors = []
+        input_pools = []
+        input_up_samples = []
 
-    for i in range(num_layers):
-        neighbour_idx = (jt.knn(batch_xyz, batch_xyz, 16))[1]
-        sub_points = batch_xyz[:, :batch_xyz.shape[1] // sub_sampling_ratio[i], :]
-        pool_i = neighbour_idx[:, :batch_xyz.shape[1] // sub_sampling_ratio[i], :]
-        up_i = jt.knn(batch_xyz, sub_points, 1)[1]
-        input_points.append(batch_xyz)
-        input_neighbors.append(neighbour_idx)
-        input_pools.append(pool_i)
-        input_up_samples.append(up_i)
-        batch_xyz = sub_points
+        for i in range(num_layers):
+            neighbour_idx = (jt.knn(batch_xyz, batch_xyz, 16))[1]
+            sub_points = batch_xyz[:, :batch_xyz.shape[1] // sub_sampling_ratio[i], :]
+            pool_i = neighbour_idx[:, :batch_xyz.shape[1] // sub_sampling_ratio[i], :]
+            up_i = jt.knn(batch_xyz, sub_points, 1)[1]
+            input_points.append(batch_xyz)
+            input_neighbors.append(neighbour_idx)
+            input_pools.append(pool_i)
+            input_up_samples.append(up_i)
+            batch_xyz = sub_points
 
-    flat_inputs = input_points + input_neighbors + input_pools + input_up_samples
-    flat_inputs += [batch_features, batch_labels, batch_pc_idx, batch_cloud_idx]
-    for x in flat_inputs:
-        print(x.shape)
-    outputs = model(
-        xyz=flat_inputs[:num_layers], 
-        feature=flat_inputs[4 * num_layers],
-        neigh_idx=flat_inputs[num_layers: 2 * num_layers],
-        sub_idx=flat_inputs[2 * num_layers:3 * num_layers],
-        interp_idx=flat_inputs[3 * num_layers:4 * num_layers])
-    print (outputs.shape)
+        flat_inputs = input_points + input_neighbors + input_pools + input_up_samples
+        flat_inputs += [batch_features, batch_labels, batch_pc_idx, batch_cloud_idx]
+        # for x in flat_inputs:
+        #     print(x.shape)
+        outputs = model(
+            xyz=flat_inputs[:num_layers], 
+            feature=flat_inputs[4 * num_layers],
+            neigh_idx=flat_inputs[num_layers: 2 * num_layers],
+            sub_idx=flat_inputs[2 * num_layers:3 * num_layers],
+            interp_idx=flat_inputs[3 * num_layers:4 * num_layers])
+        
+        print("step{}".format(j), outputs.shape)
 
 if __name__ == '__main__':
     main()

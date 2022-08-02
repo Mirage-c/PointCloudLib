@@ -82,7 +82,7 @@ class S3DIS(Dataset):
         elif partition == 'test':
             num_per_epoch = cfg.val_steps * cfg.val_batch_size
             self.partition = 'validation'
-        
+        print(self.partition, "num_per_epoch:", num_per_epoch)
         self.possibility[self.partition] = []
         self.min_possibility[self.partition] = []
         # Random initialize
@@ -142,8 +142,8 @@ class S3DIS(Dataset):
                 print('{:s} done in {:.1f}s'.format(cloud_name, time.time() - t0))
 
     def __getitem__(self, index):
-        data, labels, seg = next(self.generator)
-        return data, labels, seg
+        xyz, color, labels, idx, cloud = next(self.generator)
+        return xyz, color, labels, idx, cloud 
     
     def spatially_regular_gen(self):
         # for i in range(self.num_per_epoch):
@@ -191,12 +191,12 @@ class S3DIS(Dataset):
                 queried_pc_xyz, queried_pc_colors, queried_idx, queried_pc_labels = \
                     DP.data_aug(queried_pc_xyz, queried_pc_colors, queried_pc_labels, queried_idx, cfg.num_points)
 
-            # yield (queried_pc_xyz.astype(np.float32),
-            #             queried_pc_colors.astype(np.float32),
-            #             queried_pc_labels,
-            #             queried_idx.astype(np.int32),
-            #             np.array([cloud_idx], dtype=np.int32))
-            yield jt.concat([queried_pc_xyz.astype(np.float32), queried_pc_colors.astype(np.float32)], 1), self.label_values, queried_pc_labels
+            yield (queried_pc_xyz.astype(np.float32),
+                        queried_pc_colors.astype(np.float32),
+                        queried_pc_labels,
+                        queried_idx.astype(np.int32),
+                        np.array([cloud_idx], dtype=np.int32))
+            # yield jt.concat([queried_pc_xyz.astype(np.float32), queried_pc_colors.astype(np.float32)], 1), self.label_values, queried_pc_labels
 
     # Collect flat inputs
     @staticmethod

@@ -12,15 +12,12 @@ from networks.seg.pointnet2_partseg import PointNet2_partseg
 from networks.seg.pointconv_partseg import PointConvDensity_partseg
 from networks.seg.dgcnn_partseg import DGCNN_partseg
 from networks.seg.pointcnn_partseg import PointCNN_partseg
-from networks.seg.randlanet_partseg import RandLANet
-import torch
-import time 
+from networks.seg.RandLANet_partseg_tensorflow import RandLANet
 
 # jittor related 
 import jittor as jt 
 from jittor import nn
 import argparse
-
 jt.flags.use_cuda = 1
 
 seg_num = [4, 2, 2, 4, 4, 3, 3, 2, 4, 2, 6, 2, 3, 3, 3, 3]
@@ -79,17 +76,20 @@ def intersection_over_union(scores, labels):
         list of floats of length num_classes+1 (last item is mIoU)
     """
     num_classes = scores.size(-2) # we use -2 instead of 1 to enable arbitrary batch dimensions
-    # print(scores.shape)
+    print("________________")
+    print(scores.shape)
     predictions = jt.argmax(scores, dim=1)[0]
-    # print(predictions.shape)
-    # print(labels.shape)
+    print(predictions.shape)
+    print(labels.shape)
     ious = []
-
+    print("calc ous")
     for label in range(num_classes):
         pred_mask = predictions == label
         labels_mask = labels == label
         iou = (pred_mask & labels_mask).float().sum() / (pred_mask | labels_mask).float().sum()
         ious.append(iou)
+    print("appending iou")
+    print("________________")
     ious.append(np.nanmean(ious))
     return ious
 
@@ -126,54 +126,97 @@ def train(model, args):
         train_true_seg = []
         train_pred_seg = []
         train_label_seg = []
-        if args.model == 'randlanet':
-            ious = []
+        
         print("##### Epoch {} #####".format(epoch))
         # debug = 0
-        for data, label, seg in train_loader:
-            # with jt.profile_scope() as report:
-            seg = seg - seg_start_index
-            if not args.model == 'randlanet':
-                label_one_hot = np.zeros((label.shape[0], 16))
-                # print (label.size())
-                for idx in range(label.shape[0]):
-                    label_one_hot[idx, label.numpy()[idx,0]] = 1
-                label_one_hot = jt.array(label_one_hot.astype(np.float32))
-            if args.model == 'pointnet' or args.model == 'dgcnn':            
-                data = data.permute(0, 2, 1) # for pointnet it should not be committed 
-            batch_size = data.size()[0]
-            if args.model == 'pointnet2':
-                seg_pred = model(data, data, label_one_hot)
-            elif args.model == 'randlanet' :
-                seg_pred = model(data)            
+        if args.model == 'randlanet':
+            ious = []
+            num_layers = model.num_layers
+            step = 0
+            for xyz, color, labels, idx, cloud in train_loader:        
+                step += 1
+                print("step:{}".format(step))
+                flat_inputs = train_loader.generate_flat_inputs(xyz, color, labels, idx, cloud)
+                seg = flat_inputs[4 * num_layers + 1]
+                seg_pred = model(
+                    xyz=flat_inputs[:num_layers], 
+                    feature=flat_inputs[4 * num_layers],
+                    neigh_idx=flat_inputs[num_layers: 2 * num_layers],
+                    sub_idx=flat_inputs[2 * num_layers:3 * num_layers],
+                    interp_idx=flat_inputs[3 * num_layers:4 * num_layers]) # [6,40960,13] 
+                # print("out of network")
+                # print ("outputshape: {}".format(seg_pred.shape), "segshape: {}".format(seg.shape))
+                seg_pred = seg_pred.permute(0, 2, 1)
+                
+                # print("appending ious")
                 ious.append(intersection_over_union(seg_pred, seg))
-            else:
-                seg_pred = model(data, label_one_hot)
-            seg_pred = seg_pred.permute(0, 2, 1)
-            # print (seg_pred.size())
-            # print (seg_pred.size(), seg.size())
-            loss = nn.cross_entropy_loss(seg_pred.view(-1, seg_num_all), seg.view(-1))
-            # print(loss.data)
-            optimizer.step(loss)
+                seg_pred = seg_pred.permute(0, 2, 1)
+                # print (seg_pred.size(), seg.size())
+                
+                # print("calcing loss")
+                loss = nn.cross_entropy_loss(seg_pred.view(-1, seg_num_all), seg.view(-1))
+                # print(loss.data)
+                # print("stepping")
+                optimizer.step(loss)
 
-            pred = jt.argmax(seg_pred, dim=2)[0]               # (batch_size, num_points)
-            # print ('pred size =', pred.size(), seg.size())
-            count += batch_size
-            train_loss += loss.numpy() * batch_size
-            seg_np = seg.numpy()                  # (batch_size, num_points)
-            pred_np = pred.numpy()    # (batch_size, num_points)
-            # print (type(label))
+                pred = jt.argmax(seg_pred, dim=2)[0]               # (batch_size, num_points)
+                # print ('pred size =', pred.size(), seg.size())
+                count += batch_size
+                train_loss += loss.numpy() * batch_size
+                seg_np = seg.numpy()                  # (batch_size, num_points)
+                pred_np = pred.numpy()    # (batch_size, num_points)
+                # print (type(label))
+                
+                train_true_cls.append(seg_np.reshape(-1))       # (batch_size * num_points)
+                train_pred_cls.append(pred_np.reshape(-1))      # (batch_size * num_points)
+                train_true_seg.append(seg_np)
+                train_pred_seg.append(pred_np)
+        else:
+            for data, label, seg in train_loader:
+                # with jt.profile_scope() as report:
+                seg = seg - seg_start_index
+                if not args.model == 'randlanet':
+                    label_one_hot = np.zeros((label.shape[0], 16))
+                    # print (label.size())
+                    for idx in range(label.shape[0]):
+                        label_one_hot[idx, label.numpy()[idx,0]] = 1
+                    label_one_hot = jt.array(label_one_hot.astype(np.float32))
+                if args.model == 'pointnet' or args.model == 'dgcnn':            
+                    data = data.permute(0, 2, 1) # for pointnet it should not be committed 
+                batch_size = data.size()[0]
+                if args.model == 'pointnet2':
+                    seg_pred = model(data, data, label_one_hot)
+                elif args.model == 'randlanet' :
+                    seg_pred = model(data)            
+                    ious.append(intersection_over_union(seg_pred, seg))
+                else:
+                    seg_pred = model(data, label_one_hot)
+                seg_pred = seg_pred.permute(0, 2, 1)
+                # print (seg_pred.size())
+                # print (seg_pred.size(), seg.size())
+                loss = nn.cross_entropy_loss(seg_pred.view(-1, seg_num_all), seg.view(-1))
+                # print(loss.data)
+                optimizer.step(loss)
 
-            label = label.numpy() # added 
+                pred = jt.argmax(seg_pred, dim=2)[0]               # (batch_size, num_points)
+                # print ('pred size =', pred.size(), seg.size())
+                count += batch_size
+                train_loss += loss.numpy() * batch_size
+                seg_np = seg.numpy()                  # (batch_size, num_points)
+                pred_np = pred.numpy()    # (batch_size, num_points)
+                # print (type(label))
+
+                label = label.numpy() # added 
+                
+                train_true_cls.append(seg_np.reshape(-1))       # (batch_size * num_points)
+                train_pred_cls.append(pred_np.reshape(-1))      # (batch_size * num_points)
+                train_true_seg.append(seg_np)
+                train_pred_seg.append(pred_np)
+                temp_label = label.reshape(-1, 1)
             
-            train_true_cls.append(seg_np.reshape(-1))       # (batch_size * num_points)
-            train_pred_cls.append(pred_np.reshape(-1))      # (batch_size * num_points)
-            train_true_seg.append(seg_np)
-            train_pred_seg.append(pred_np)
-            temp_label = label.reshape(-1, 1)
-        
-            train_label_seg.append(temp_label)
-            # print(report)
+                train_label_seg.append(temp_label)
+                # print(report)
+        print("##### Epoch {} train ok #####".format(epoch))
         train_true_cls = np.concatenate(train_true_cls)
         train_pred_cls = np.concatenate(train_pred_cls)
         # print (train_true_cls.shape ,train_pred_cls.shape)
@@ -185,9 +228,9 @@ def train(model, args):
         train_pred_seg = np.concatenate(train_pred_seg, axis=0)
         # print (len(train_label_seg), train_label_seg[0].size())
         # print (train_label_seg[0])
-        train_label_seg = np.concatenate(train_label_seg, axis=0)
         # print (train_pred_seg.shape, train_true_seg.shape, train_label_seg.shape)
         if not args.model == 'randlanet':
+            train_label_seg = np.concatenate(train_label_seg, axis=0)
             train_ious = calculate_shape_IoU(train_pred_seg, train_true_seg, train_label_seg, None)
         else:
             train_ious = np.nanmean(np.array(ious), axis=0)
@@ -211,45 +254,76 @@ def train(model, args):
         test_label_seg = []
         if args.model == 'randlanet':
             ious = []
-        for data, label, seg in test_loader:
-            seg = seg - seg_start_index
-            if not args.model == 'randlanet':
-                label_one_hot = np.zeros((label.shape[0], 16))
-                for idx in range(label.shape[0]):
-                    label_one_hot[idx, label.numpy()[idx,0]] = 1
-                label_one_hot = jt.array(label_one_hot.astype(np.float32))
-            if args.model == 'pointnet' or args.model == 'dgcnn':            
-                data = data.permute(0, 2, 1) # for pointnet it should not be committed 
-            batch_size = data.size()[0]
-            if args.model == 'pointnet2':
-                seg_pred = model(data, data, label_one_hot)
-            elif args.model == 'randlanet':
-                seg_pred = model(data)
+            num_layers = model.num_layers
+            for xyz, color, labels, idx, cloud in test_loader:          
+                flat_inputs = test_loader.generate_flat_inputs(xyz, color, labels, idx, cloud)
+                seg = flat_inputs[4 * num_layers + 1]
+                seg_pred = model(
+                    xyz=flat_inputs[:num_layers], 
+                    feature=flat_inputs[4 * num_layers],
+                    neigh_idx=flat_inputs[num_layers: 2 * num_layers],
+                    sub_idx=flat_inputs[2 * num_layers:3 * num_layers],
+                    interp_idx=flat_inputs[3 * num_layers:4 * num_layers]) # [6,40960,13] 
+                # print ("outputshape: {}".format(seg_pred.shape), "segshape: {}".format(seg.shape))
+                seg_pred = seg_pred.permute(0, 2, 1)
                 ious.append(intersection_over_union(seg_pred, seg))
-            else :
-                seg_pred = model(data, label_one_hot)
-            seg_pred = seg_pred.permute(0, 2, 1)
-            loss = nn.cross_entropy_loss(seg_pred.view(-1, seg_num_all), seg.view(-1,1).squeeze(-1))
-            pred = jt.argmax(seg_pred, dim=2)[0]
-            count += batch_size
-            test_loss += loss.numpy() * batch_size
-            seg_np = seg.numpy()
-            pred_np = pred.numpy()
-            label = label.numpy() # added 
+                seg_pred = seg_pred.permute(0, 2, 1)
+                # print (seg_pred.size(), seg.size())
+                loss = nn.cross_entropy_loss(seg_pred.view(-1, seg_num_all), seg.view(-1))
+                # print(loss.data)
+                optimizer.step(loss)
 
-            test_true_cls.append(seg_np.reshape(-1))
-            test_pred_cls.append(pred_np.reshape(-1))
-            test_true_seg.append(seg_np)
-            test_pred_seg.append(pred_np)
-            test_label_seg.append(label.reshape(-1, 1))
+                pred = jt.argmax(seg_pred, dim=2)[0]               # (batch_size, num_points)
+                # print ('pred size =', pred.size(), seg.size())
+                count += batch_size
+                test_loss += loss.numpy() * batch_size
+                seg_np = seg.numpy()
+                pred_np = pred.numpy()
+
+                test_true_cls.append(seg_np.reshape(-1))
+                test_pred_cls.append(pred_np.reshape(-1))
+                test_true_seg.append(seg_np)
+                test_pred_seg.append(pred_np)
+        else:
+            for data, label, seg in test_loader:
+                seg = seg - seg_start_index
+                if not args.model == 'randlanet':
+                    label_one_hot = np.zeros((label.shape[0], 16))
+                    for idx in range(label.shape[0]):
+                        label_one_hot[idx, label.numpy()[idx,0]] = 1
+                    label_one_hot = jt.array(label_one_hot.astype(np.float32))
+                if args.model == 'pointnet' or args.model == 'dgcnn':            
+                    data = data.permute(0, 2, 1) # for pointnet it should not be committed 
+                batch_size = data.size()[0]
+                if args.model == 'pointnet2':
+                    seg_pred = model(data, data, label_one_hot)
+                elif args.model == 'randlanet':
+                    seg_pred = model(data)
+                    ious.append(intersection_over_union(seg_pred, seg))
+                else :
+                    seg_pred = model(data, label_one_hot)
+                seg_pred = seg_pred.permute(0, 2, 1)
+                loss = nn.cross_entropy_loss(seg_pred.view(-1, seg_num_all), seg.view(-1,1).squeeze(-1))
+                pred = jt.argmax(seg_pred, dim=2)[0]
+                count += batch_size
+                test_loss += loss.numpy() * batch_size
+                seg_np = seg.numpy()
+                pred_np = pred.numpy()
+                label = label.numpy() # added 
+
+                test_true_cls.append(seg_np.reshape(-1))
+                test_pred_cls.append(pred_np.reshape(-1))
+                test_true_seg.append(seg_np)
+                test_pred_seg.append(pred_np)
+                test_label_seg.append(label.reshape(-1, 1))
         test_true_cls = np.concatenate(test_true_cls)
         test_pred_cls = np.concatenate(test_pred_cls)
         test_acc = metrics.accuracy_score(test_true_cls, test_pred_cls)
         avg_per_class_acc = metrics.balanced_accuracy_score(test_true_cls, test_pred_cls)
         test_true_seg = np.concatenate(test_true_seg, axis=0)
         test_pred_seg = np.concatenate(test_pred_seg, axis=0)
-        test_label_seg = np.concatenate(test_label_seg)
         if not args.model == 'randlanet':
+            test_label_seg = np.concatenate(test_label_seg)
             test_ious = calculate_shape_IoU(test_pred_seg, test_true_seg, test_label_seg, None)
         else:
             test_ious = np.nanmean(np.array(ious), axis=0)
@@ -300,7 +374,7 @@ if __name__ == "__main__":
     elif args.model == 'pointconv':
         model = PointConvDensity_partseg(part_num=50)
     elif args.model == 'randlanet':
-        model = RandLANet(6,13)
+        model = RandLANet()
     else:
         raise Exception("Not implemented")
 
