@@ -696,10 +696,10 @@ class ModelNet40Sampler():
         batch_n = 0
 
         # Generator loop
-        # for p_i in gen_indices:
-        for s, x in enumerate(self.dataset.input_points):
+        for p_i in gen_indices:
+        # for s, x in enumerate(self.dataset.input_points):
             # Size of picked cloud
-            n = self.dataset.input_points[s].shape[0]
+            n = self.dataset.input_points[p_i].shape[0]
 
             # In case batch is full, yield it and reset it
             if batch_n + n > self.batch_limit and batch_n > 0:
@@ -708,7 +708,7 @@ class ModelNet40Sampler():
                 batch_n = 0
 
             # Add data to current batch
-            ti_list += [s]
+            ti_list += [p_i]
 
             # Update batch size
             batch_n += n
@@ -1421,9 +1421,14 @@ if __name__ == "__main__":
     #         print(x.shape)
     #     break
     print("### sampled data ###")
-    for sampled_idx in training_sampler:
-        sampled_data = training_dataset.__getitem__(sampled_idx)
-        # print(sampled_data)
-        for x in sampled_data:
-            print(x.shape)
-        break
+    sampled_idx = next(training_sampler.__iter__())
+    sampled_data = training_dataset.__getitem__(sampled_idx)
+    # print(sampled_data)
+    for x in sampled_data:
+        print(x.shape)
+    # sampled_idx = next(training_sampler.__iter__())
+    # sampled_data = training_dataset.__getitem__(sampled_idx)
+    # # print(sampled_data)
+    # for x in sampled_data:
+    #     print(x.shape)
+    # break
