@@ -4,10 +4,10 @@ import jittor as jt
 # from jittor import nn
 from jittor.contrib import concat 
 from jittor import init 
-from blocks import *
+from networks.cls.blocks import *
 import pickle
 from jittor_utils import auto_diff
-from datasets.ModelNet40 import ModelNet40CustomBatch
+from networks.cls.datasets.ModelNet40 import ModelNet40CustomBatch
 
 def p2p_fitting_regularizer(net):
 
@@ -37,7 +37,7 @@ def p2p_fitting_regularizer(net):
 
             # Point should not be close to each other
             for i in range(net.K):
-                other_KP = jt.concat([KP_locs[:, :i, :], KP_locs[:, i + 1:, :]], dim=1).detach()
+                other_KP = jt.concat([KP_locs[:, :i, :], KP_locs[:, i + 1:, :]], dim=1)
                 distances = jt.sqrt(jt.sum((other_KP - KP_locs[:, i:i + 1, :]) ** 2, dim=2))
                 rep_loss = jt.sum(jt.clamp(distances - net.repulse_extent, max_v=0.0) ** 2, dim=1)
                 repulsive_loss += net.l1(rep_loss, jt.zeros_like(rep_loss)) / net.K
@@ -127,7 +127,7 @@ class KPCNN(nn.Module):
     def execute(self, batch):
 
         # Save all block operations in a list of modules
-        x = batch.features.clone().detach()
+        x = batch.features
 
         # Loop over consecutive blocks
         for block_op in self.block_ops:

@@ -238,7 +238,7 @@ class ModelNet40Dataset():
         self.ignored_labels = np.array([])
 
         # Dataset folder
-        self.path = '../../../../Data/ModelNet40'
+        self.path = '../Data/ModelNet40'
 
         # Type of task conducted on this dataset
         self.dataset_task = 'classification'
@@ -757,6 +757,8 @@ class ModelNet40Sampler():
                                    self.dataset.config.batch_num)
         if key in batch_lim_dict:
             self.batch_limit = batch_lim_dict[key]
+            self.batch_limit //= 4
+            print("batch_limit: ", self.batch_limit)
         else:
             redo = True
 
