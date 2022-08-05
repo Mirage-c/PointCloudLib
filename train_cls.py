@@ -17,7 +17,7 @@ import math
 from data_utils.modelnet40_loader import ModelNet40
 from misc.utils import LRScheduler
 import argparse
-from networks.cls.datasets.ModelNet40 import ModelNet40Dataset, ModelNet40Sampler, ModelNet40CustomBatch, Modelnet40Config
+from datasets.ModelNet40 import ModelNet40Dataset, ModelNet40Sampler, ModelNet40CustomBatch, Modelnet40Config
 
 import time 
 
@@ -144,7 +144,22 @@ def evaluate_kpconv(net, epoch, dataloader: ModelNet40Dataset, sampler: ModelNet
     acc = total_acc / total_num
     return acc
 
+def hook_kpconv():
+    import pickle
+    from jittor_utils import auto_diff
+    f = open("../KPConv-PyTorch/data.txt", 'rb')
+    data = pickle.load(f)
+    f.close()
+    cfg = Modelnet40Config()
+    batch = ModelNet40CustomBatch([data])
+    model = KPCNN(cfg)
+    hook = auto_diff.Hook("KPCNN")
+    hook.hook_module(model)
+    outputs = model(batch)
+    exit(0)
+
 if __name__ == '__main__':
+    # hook_kpconv()
     freeze_random_seed()
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--model', type=str, default='[pointnet]', metavar='N',
@@ -197,9 +212,9 @@ if __name__ == '__main__':
         val_dataloader = ModelNet40Dataset(cfg, train=False)
         train_sampler = ModelNet40Sampler(train_dataloader)
         val_sampler = ModelNet40Sampler(val_dataloader)
-        train_sampler.calibration()
-        val_sampler.calibration()
-        chkp_path = "/mnt/disk1/chentuo/PointNet/KPConv-PyTorch/results/Log_2022-08-04_15-17-48/checkpoints/current_chkp.tar"
+        train_sampler.calibration(batch_division=1)
+        val_sampler.calibration(batch_division=1)
+        chkp_path = "/data/chentuo/KPConv-PyTorch/checkpoints/current_chkp.tar"
         checkpoint = torch.load(chkp_path)
         net.load_state_dict(checkpoint['model_state_dict'])
         # optimizer不控制

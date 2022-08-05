@@ -25,8 +25,6 @@
 # Import numpy package and name it "np"
 import time
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import cm
 from os import makedirs
 from os.path import join, exists
 import sys
@@ -417,9 +415,6 @@ def spherical_Lloyd(radius, num_cells, dimension=3, fixed='center', approximatio
     # Approximation initialization
     ##############################
 
-    # Initialize figure
-    if verbose > 1:
-        fig = plt.figure()
 
     # Initialize discretization in this method is chosen
     if approximation == 'discretization':
@@ -499,51 +494,10 @@ def spherical_Lloyd(radius, num_cells, dimension=3, fixed='center', approximatio
             print('iter {:5d} / max move = {:f}'.format(iter, np.max(np.linalg.norm(moves, axis=1))))
             if warning:
                 print('{:}WARNING: at least one point has no cell{:}'.format(bcolors.WARNING, bcolors.ENDC))
-        if verbose > 1:
-            plt.clf()
-            plt.scatter(X[:, 0], X[:, 1], c=cell_inds, s=20.0,
-                        marker='.', cmap=plt.get_cmap('tab20'))
-            #plt.scatter(kernel_points[:, 0], kernel_points[:, 1], c=np.arange(num_cells), s=100.0,
-            #            marker='+', cmap=plt.get_cmap('tab20'))
-            plt.plot(kernel_points[:, 0], kernel_points[:, 1], 'k+')
-            circle = plt.Circle((0, 0), radius0, color='r', fill=False)
-            fig.axes[0].add_artist(circle)
-            fig.axes[0].set_xlim((-radius0 * 1.1, radius0 * 1.1))
-            fig.axes[0].set_ylim((-radius0 * 1.1, radius0 * 1.1))
-            fig.axes[0].set_aspect('equal')
-            plt.draw()
-            plt.pause(0.001)
-            plt.show(block=False)
 
     ###################
     # User verification
     ###################
-
-    # Show the convergence to ask user if this kernel is correct
-    if verbose:
-        if dimension == 2:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=[10.4, 4.8])
-            ax1.plot(max_moves)
-            ax2.scatter(X[:, 0], X[:, 1], c=cell_inds, s=20.0,
-                        marker='.', cmap=plt.get_cmap('tab20'))
-            # plt.scatter(kernel_points[:, 0], kernel_points[:, 1], c=np.arange(num_cells), s=100.0,
-            #            marker='+', cmap=plt.get_cmap('tab20'))
-            ax2.plot(kernel_points[:, 0], kernel_points[:, 1], 'k+')
-            circle = plt.Circle((0, 0), radius0, color='r', fill=False)
-            ax2.add_artist(circle)
-            ax2.set_xlim((-radius0 * 1.1, radius0 * 1.1))
-            ax2.set_ylim((-radius0 * 1.1, radius0 * 1.1))
-            ax2.set_aspect('equal')
-            plt.title('Check if kernel is correct.')
-            plt.draw()
-            plt.show()
-
-        if dimension > 2:
-            plt.figure()
-            plt.plot(max_moves)
-            plt.title('Check if kernel is correct.')
-            plt.show()
-
     # Rescale kernels with real radius
     return kernel_points * radius
 
@@ -605,9 +559,6 @@ def kernel_point_optimization_debug(radius, num_points, num_kernels=1, dimension
     # Kernel optimization
     #####################
 
-    # Initialize figure
-    if verbose>1:
-        fig = plt.figure()
 
     saved_gradient_norms = np.zeros((10000, num_kernels))
     old_gradient_norms = np.zeros((num_kernels, num_points))
@@ -670,18 +621,6 @@ def kernel_point_optimization_debug(radius, num_points, num_kernels=1, dimension
 
         if verbose:
             print('step {:5d} / max grad = {:f}'.format(step, np.max(gradients_norms[:, 3:])))
-        if verbose > 1:
-            plt.clf()
-            plt.plot(kernel_points[0, :, 0], kernel_points[0, :, 1], '.')
-            circle = plt.Circle((0, 0), radius, color='r', fill=False)
-            fig.axes[0].add_artist(circle)
-            fig.axes[0].set_xlim((-radius*1.1, radius*1.1))
-            fig.axes[0].set_ylim((-radius*1.1, radius*1.1))
-            fig.axes[0].set_aspect('equal')
-            plt.draw()
-            plt.pause(0.001)
-            plt.show(block=False)
-            print(moving_factor)
 
         # moving factor decay
         moving_factor *= continuous_moving_decay

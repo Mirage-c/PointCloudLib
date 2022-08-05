@@ -723,7 +723,7 @@ class ModelNet40Sampler():
         """
         return None
 
-    def calibration(self, verbose=False):
+    def calibration(self, batch_division = 1, verbose=False):
         """
         Method performing batch and neighbors calibration.
             Batch calibration: Set "batch_limit" (the maximum number of points allowed in every batch) so that the
@@ -757,7 +757,7 @@ class ModelNet40Sampler():
                                    self.dataset.config.batch_num)
         if key in batch_lim_dict:
             self.batch_limit = batch_lim_dict[key]
-            self.batch_limit //= 4
+            self.batch_limit //= batch_division
             print("batch_limit: ", self.batch_limit)
         else:
             redo = True
@@ -839,7 +839,6 @@ class ModelNet40CustomBatch:
         # print("Custom batch init")
         # Get rid of batch dimension
         input_list = input_list[0]
-        self.input_list = input_list
         # Number of layers
         L = (len(input_list) - 5) // 4
         # print("input_list: ")
