@@ -7,7 +7,7 @@ from jittor import init
 from networks.cls.blocks import *
 import pickle
 from jittor_utils import auto_diff
-from networks.cls.datasets.ModelNet40 import ModelNet40CustomBatch
+from datasets.ModelNet40 import ModelNet40CustomBatch
 
 def p2p_fitting_regularizer(net):
 

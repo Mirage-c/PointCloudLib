@@ -17,9 +17,11 @@ import math
 from data_utils.modelnet40_loader import ModelNet40
 from misc.utils import LRScheduler
 import argparse
-from networks.cls.datasets.ModelNet40 import ModelNet40Dataset, ModelNet40Sampler, ModelNet40CustomBatch, Modelnet40Config
+from datasets.ModelNet40 import ModelNet40Dataset, ModelNet40Sampler, ModelNet40CustomBatch, Modelnet40Config
 
 import time 
+import pickle
+from jittor_utils import auto_diff
 
 def freeze_random_seed():
     np.random.seed(0)
@@ -90,6 +92,7 @@ def train_kpconv(net, optimizer, epoch, dataloader: ModelNet40Dataset, sampler: 
         optimizer.step(loss) 
         pred = np.argmax(output.data, axis=1)
         # print("pred:", pred)
+        jt.display_memory_info()
         # print("labels:",batch_data.labels.data)
         acc = np.mean(pred == batch_data.labels.data) * 100
         pbar.set_description(f'Epoch {epoch} [TRAIN] loss = {loss.data[0]:.2f}, acc = {acc:.2f}')
@@ -144,7 +147,59 @@ def evaluate_kpconv(net, epoch, dataloader: ModelNet40Dataset, sampler: ModelNet
     acc = total_acc / total_num
     return acc
 
+def hook():
+    cfg = Modelnet40Config()
+    net = KPCNN(cfg)
+    chkp_path = "/mnt/disk1/chentuo/PointNet/KPConv-PyTorch/results/Log_2022-08-04_15-17-48/checkpoints/current_chkp.tar"
+    checkpoint = torch.load(chkp_path)
+    net.load_state_dict(checkpoint['model_state_dict'])
+    # optimizer不控制
+    print("Model and training state restored.")
+    other_params = [v for k, v in net.named_parameters() if 'offset' not in k and 'running' not in k]
+    optimizer = nn.SGD(other_params, lr = cfg.learning_rate, momentum = cfg.momentum, weight_decay=cfg.weight_decay)
+    f = open('/mnt/disk1/chentuo/PointNet/PointCloudLib/networks/cls/data.txt', 'rb')
+    data = pickle.load(f)
+    f.close()
+    batch = ModelNet40CustomBatch([data])
+    # hook = auto_diff.Hook("KPCNN")
+    # hook.hook_module(net)
+    # hook = auto_diff.Hook("KPCNN_optim")
+    # hook.hook_optimizer(optimizer)
+    outputs = net(batch)
+    loss = net.loss(outputs, batch.labels)
+    acc = net.accuracy(outputs, batch.labels)
+    # jt.display_memory_info()
+    # Backward + optimize
+    idx = 0
+    for k, v in net.named_parameters():
+        if 'offset' not in k and 'running' not in k and 'output_loss' not in k:
+            print(" [", idx, "] ", k, " ###### ", jt.grad(loss, v))
+            idx += 1
+    # optimizer.step(loss)
+    outputs = net(batch)
+    # jt.display_memory_info()
+    exit(0)
+
+def hook_KPConv():
+    from networks.cls.blocks import KPConv
+    cfg = Modelnet40Config()
+    kpconv = KPConv(15, 3, 256, 256, 0.384, 0.8, modulated=True)
+    in1 = jt.zeros([457, 3])
+    in2 = jt.zeros([457, 3])
+    in3 = jt.zeros([457, 30])
+    in4 = jt.zeros([457, 256])
+    output = kpconv(in1, in2, in3, in4)
+    out = jt.ones([457])
+    other_params = [v for k, v in kpconv.named_parameters() if 'offset' not in k and 'running' not in k]
+    optimizer = nn.SGD(other_params, lr = cfg.learning_rate, momentum = cfg.momentum, weight_decay=cfg.weight_decay)
+    loss = nn.cross_entropy_loss(output, out)
+    optimizer.step(loss)
+    exit(0)
+
+
+
 if __name__ == '__main__':
+    hook()
     freeze_random_seed()
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--model', type=str, default='[pointnet]', metavar='N',
@@ -184,7 +239,14 @@ if __name__ == '__main__':
     if args.model != 'kpconv':
         optimizer = nn.SGD(net.parameters(), lr = base_lr, momentum = args.momentum)
     else:
-        optimizer = nn.SGD(net.parameters(), lr = cfg.learning_rate, momentum = cfg.momentum, weight_decay=cfg.weight_decay)
+        other_params = [v for k, v in net.named_parameters() if 'offset' not in k and 'running' not in k]
+        # idx = 0
+        # for k, v in net.named_parameters():
+        #     if 'offset' not in k and 'running' not in k:
+        #         print(" [", idx, "] ", k, " ###### ", v.shape)
+        #         idx += 1
+        # exit(0)
+        optimizer = nn.SGD(other_params, lr = cfg.learning_rate, momentum = cfg.momentum, weight_decay=cfg.weight_decay)
     lr_scheduler = LRScheduler(optimizer, base_lr)
 
     batch_size = args.batch_size
@@ -213,6 +275,7 @@ if __name__ == '__main__':
             cfg = Modelnet40Config()
             train_kpconv(net, optimizer, epoch, train_dataloader, train_sampler)
             acc = evaluate_kpconv(net, epoch, val_dataloader, val_sampler)
+            print("Acc: ", acc)
             # if epoch in cfg.lr_decays:
             #     optimizer.lr *= cfg.lr_decays[epoch]
         else:

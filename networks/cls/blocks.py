@@ -141,7 +141,9 @@ class KPConv(nn.Module):
         :param modulated: choose if kernel weights are modulated in addition to deformed
         """
         super(KPConv, self).__init__()
-
+        print(kernel_size, p_dim, in_channels, out_channels, KP_extent, radius,
+                 fixed_kernel_points, KP_influence, aggregation_mode,
+                 deformable, modulated)
         # Save parameters
         self.K = kernel_size
         self.p_dim = p_dim
@@ -214,7 +216,7 @@ class KPConv(nn.Module):
         return jt.array(K_points_numpy, dtype=jt.float32) # Parameter
 
     def execute(self, q_pts, s_pts, neighb_inds, x):
-
+        # print("in: ", q_pts.shape, s_pts.shape, neighb_inds.shape, x.shape)
         ###################
         # Offset generation
         ###################
@@ -349,7 +351,9 @@ class KPConv(nn.Module):
         kernel_outputs = jt.matmul(weighted_features, self.weights)
 
         # Convolution sum [n_points, out_fdim]
-        return jt.sum(kernel_outputs, dim=0)
+        out = jt.sum(kernel_outputs, dim=0)
+        # print("out:", out.shape)
+        return out
 
     def __repr__(self):
         return 'KPConv(radius: {:.2f}, in_feat: {:d}, out_feat: {:d})'.format(self.radius,
