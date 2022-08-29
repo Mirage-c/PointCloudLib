@@ -125,12 +125,13 @@ class KPCNN(nn.Module):
         return
 
     def execute(self, batch):
-
+        batch = ModelNet40CustomBatch([batch])
         # Save all block operations in a list of modules
         x = batch.features
 
         # Loop over consecutive blocks
-        for block_op in self.block_ops:
+        for i, block_op in enumerate(self.block_ops):
+            x.sync()
             x = block_op(x, batch)
 
         # Head of network

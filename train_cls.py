@@ -15,6 +15,7 @@ from networks.cls.kpconv import KPCNN
 import math 
 
 from data_utils.modelnet40_loader import ModelNet40
+from data_utils.kpconv_loader import KPConvLoader
 from misc.utils import LRScheduler
 import argparse
 from datasets.ModelNet40 import ModelNet40Dataset, ModelNet40Sampler, ModelNet40CustomBatch, Modelnet40Config
@@ -74,29 +75,27 @@ def train(net, optimizer, epoch, dataloader, args):
         acc = np.mean(pred == labels.data) * 100
         pbar.set_description(f'Epoch {epoch} [TRAIN] loss = {loss.data[0]:.2f}, acc = {acc:.2f}')
 
-def train_kpconv(net, optimizer, epoch, dataloader: ModelNet40Dataset, sampler: ModelNet40Sampler):
+def train_kpconv(net, optimizer, epoch, dataloader: KPConvLoader):
     net.train()
 
-    pbar = tqdm(sampler, desc=f'Epoch {epoch} [TRAIN]')
+    pbar = tqdm(dataloader, desc=f'Epoch {epoch} [TRAIN]')
     jt.sync_all(True)
-    for sampled_idx in pbar:
-        # print("sampled_idx:", sampled_idx)
-        sampled_data = dataloader.__getitem__(sampled_idx)
-        # for x in sampled_data:
-        #     print(x.shape)
+    for input_list in pbar:
         optimizer.zero_grad()
-        batch_data = ModelNet40CustomBatch([sampled_data])
-        output = net(batch_data)
+        L = (len(input_list) - 5) // 4
+        labels = jt.array(input_list[4 * L + 1])
         jt.sync_all(True)
-        loss = soft_cross_entropy_loss(output, batch_data.labels)
-        optimizer.step(loss) 
+        output = net(input_list)
+        jt.sync_all(True)
+        loss = soft_cross_entropy_loss(output, labels)
+        jt.sync_all(True)
+        optimizer.step(loss)
+        # jt.sync_all(True) 
         pred = np.argmax(output.data, axis=1)
         # print("pred:", pred)
-        jt.display_memory_info()
-        # print("labels:",batch_data.labels.data)
-        acc = np.mean(pred == batch_data.labels.data) * 100
+        # jt.display_memory_info()
+        acc = np.mean(pred == labels.data) * 100
         pbar.set_description(f'Epoch {epoch} [TRAIN] loss = {loss.data[0]:.2f}, acc = {acc:.2f}')
-        jt.sync_all(True)
 
 def evaluate(net, epoch, dataloader, args):
     total_acc = 0
@@ -128,21 +127,21 @@ def evaluate(net, epoch, dataloader, args):
     acc = total_acc / total_num
     return acc
 
-def evaluate_kpconv(net, epoch, dataloader: ModelNet40Dataset, sampler: ModelNet40Sampler,):
+def evaluate_kpconv(net, epoch, dataloader: KPConvLoader):
     total_acc = 0
     total_num = 0
 
     net.eval()
     total_time = 0.0
-    for sampled_idx in tqdm(sampler, desc=f'Epoch {epoch} [Val]'):
-        sampled_data = dataloader.__getitem__(sampled_idx)
-        batch_data = ModelNet40CustomBatch([sampled_data])
-        output = net(batch_data)
+    for input_list in tqdm(dataloader, desc=f'Epoch {epoch} [Val]'):
+        L = (len(input_list) - 5) // 4
+        labels = jt.array(input_list[4 * L + 1])
+        output = net(input_list)
 
         pred = np.argmax(output.data, axis=1)
-        acc = np.sum(pred == batch_data.labels.data)
+        acc = np.sum(pred == labels.data)
         total_acc += acc
-        total_num += batch_data.labels.shape[0] 
+        total_num += labels.shape[0] 
     acc = 0.0
     acc = total_acc / total_num
     return acc
@@ -161,8 +160,8 @@ def hook():
     data = pickle.load(f)
     f.close()
     batch = ModelNet40CustomBatch([data])
-    # hook = auto_diff.Hook("KPCNN")
-    # hook.hook_module(net)
+    hook = auto_diff.Hook("KPCNN")
+    hook.hook_module(net)
     # hook = auto_diff.Hook("KPCNN_optim")
     # hook.hook_optimizer(optimizer)
     outputs = net(batch)
@@ -170,12 +169,12 @@ def hook():
     acc = net.accuracy(outputs, batch.labels)
     # jt.display_memory_info()
     # Backward + optimize
-    idx = 0
-    for k, v in net.named_parameters():
-        if 'offset' not in k and 'running' not in k and 'output_loss' not in k:
-            print(" [", idx, "] ", k, " ###### ", jt.grad(loss, v))
-            idx += 1
-    # optimizer.step(loss)
+    # idx = 0
+    # for k, v in net.named_parameters():
+    #     if 'offset' not in k and 'running' not in k and 'output_loss' not in k:
+    #         print(" [", idx, "] ", k, " ###### ", jt.grad(loss, v))
+    #         idx += 1
+    optimizer.step(loss)
     outputs = net(batch)
     # jt.display_memory_info()
     exit(0)
@@ -199,7 +198,8 @@ def hook_KPConv():
 
 
 if __name__ == '__main__':
-    hook()
+    
+    # hook()
     freeze_random_seed()
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--model', type=str, default='[pointnet]', metavar='N',
@@ -255,29 +255,41 @@ if __name__ == '__main__':
         train_dataloader = ModelNet40(n_points=n_points, batch_size=batch_size, train=True, shuffle=True)
         val_dataloader = ModelNet40(n_points=n_points, batch_size=batch_size, train=False, shuffle=False)
     else:
-        train_dataloader = ModelNet40Dataset(cfg, train=True)
-        val_dataloader = ModelNet40Dataset(cfg, train=False)
-        train_sampler = ModelNet40Sampler(train_dataloader)
-        val_sampler = ModelNet40Sampler(val_dataloader)
-        train_sampler.calibration()
-        val_sampler.calibration()
-        chkp_path = "/mnt/disk1/chentuo/PointNet/KPConv-PyTorch/results/Log_2022-08-04_15-17-48/checkpoints/current_chkp.tar"
-        checkpoint = torch.load(chkp_path)
-        net.load_state_dict(checkpoint['model_state_dict'])
-        # optimizer不控制
-        print("Model and training state restored.")
+        # cfg.validation_size = 2000
+        # cfg.val_batch_num = 10
+        # train_dataloader = ModelNet40Dataset(cfg, train=True)
+        # val_dataloader = ModelNet40Dataset(cfg, train=False)
+        # train_sampler = ModelNet40Sampler(train_dataloader, balance_labels=True)
+        # val_sampler = ModelNet40Sampler(val_dataloader, balance_labels=True)
+        # train_sampler.calibration()
+        # val_sampler.calibration()
+        # for sampled_idx in train_sampler:
+        #     sampled_data = train_dataloader.__getitem__(sampled_idx)
+        #     net(sampled_data)
+        train_dataloader = KPConvLoader(cfg, train=True)
+        val_dataloader = KPConvLoader(cfg, train=False)
+        #### load model ####
+        # chkp_path = "/mnt/disk1/chentuo/PointNet/KPConv-PyTorch/results/Log_2022-08-26_07-20-52/checkpoints/best_chkp.tar"
+        # chkp_path = "/mnt/disk1/chentuo/PointNet/KPConv-PyTorch/results/Log_2022-08-04_15-17-48/checkpoints/current_chkp.tar"
+        # checkpoint = torch.load(chkp_path)
+        # net.load_state_dict(checkpoint['model_state_dict'])
+        # optimizer.load_state_dict({"defaults": checkpoint['optimizer_state_dict']['param_groups'][0]})
+        
+        # print("Model and training state restored.")
+        # print(optimizer.state_dict())
+        # print("#####")
+        # print(checkpoint['optimizer_state_dict']['param_groups'][0])
+        #####
     step = 0
     best_acc = 0
     
     
     for epoch in range(args.epochs):
         if args.model == 'kpconv':
-            cfg = Modelnet40Config()
-            train_kpconv(net, optimizer, epoch, train_dataloader, train_sampler)
-            acc = evaluate_kpconv(net, epoch, val_dataloader, val_sampler)
-            print("Acc: ", acc)
-            # if epoch in cfg.lr_decays:
-            #     optimizer.lr *= cfg.lr_decays[epoch]
+            train_kpconv(net, optimizer, epoch, train_dataloader)
+            acc = evaluate_kpconv(net, epoch, val_dataloader)
+            if epoch in cfg.lr_decays:
+                optimizer.lr *= cfg.lr_decays[epoch]
         else:
             lr_scheduler.step(len(train_dataloader) * batch_size)
             train(net, optimizer, epoch, train_dataloader, args)

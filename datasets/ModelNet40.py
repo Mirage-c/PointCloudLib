@@ -757,7 +757,7 @@ class ModelNet40Sampler():
                                    self.dataset.config.batch_num)
         if key in batch_lim_dict:
             self.batch_limit = batch_lim_dict[key]
-            # self.batch_limit //= 4
+            self.batch_limit //= 4
             print("batch_limit: ", self.batch_limit)
         else:
             redo = True
@@ -843,8 +843,9 @@ class ModelNet40CustomBatch:
         # Number of layers
         L = (len(input_list) - 5) // 4
         # print("input_list: ")
-        # for i in input_list:
-        #     print(i.shape)
+        for ind, i in enumerate(input_list):
+            input_list[ind] = i.squeeze(0)
+            # print(input_list[ind].shape)
         # print("L: ", L)
         # Extract input tensors from the list of numpy array
         ind = 0
@@ -866,6 +867,20 @@ class ModelNet40CustomBatch:
         self.rots = jt.array(input_list[ind])
         ind += 1
         self.model_inds = jt.array(input_list[ind])
+        # exit(0)
+        # for x in self.points:
+        #     print(x.dtype)
+        # for x in self.neighbors:
+        #     print(x.dtype)
+        # for x in self.pools:
+        #     print(x.dtype)
+        # for x in self.lengths:
+        #     print(x.dtype)
+        # print(self.features.dtype)
+        # print(self.labels.dtype)
+        # print(self.scales.dtype)
+        # print(self.rots.dtype)
+        # print(self.model_inds.dtype)
         # exit(0)
         return
 
