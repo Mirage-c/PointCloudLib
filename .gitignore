@@ -2,4 +2,6 @@
 data
 data.zip
 *.output
-__init__.py
+*.o
+*.so
+*.tar

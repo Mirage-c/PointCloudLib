@@ -13,7 +13,7 @@ from networks.cls.pointcnn import PointCNNcls
 from networks.cls.pointconv import PointConvDensityClsSsg
 from networks.cls.kpconv import KPCNN
 import math 
-
+from os.path import exists, join
 from data_utils.modelnet40_loader import ModelNet40
 from data_utils.kpconv_loader import KPConvLoader
 from misc.utils import LRScheduler
@@ -81,14 +81,14 @@ def train_kpconv(net, optimizer, epoch, dataloader: KPConvLoader):
     pbar = tqdm(dataloader, desc=f'Epoch {epoch} [TRAIN]')
     jt.sync_all(True)
     for input_list in pbar:
-        optimizer.zero_grad()
+        # optimizer.zero_grad()
         L = (len(input_list) - 5) // 4
-        labels = jt.array(input_list[4 * L + 1])
-        jt.sync_all(True)
+        labels = jt.array(input_list[4 * L + 1]).squeeze(0)
+        # jt.sync_all(True)
         output = net(input_list)
-        jt.sync_all(True)
+        # jt.sync_all(True)
         loss = soft_cross_entropy_loss(output, labels)
-        jt.sync_all(True)
+        # jt.sync_all(True)
         optimizer.step(loss)
         # jt.sync_all(True) 
         pred = np.argmax(output.data, axis=1)
@@ -96,6 +96,7 @@ def train_kpconv(net, optimizer, epoch, dataloader: KPConvLoader):
         # jt.display_memory_info()
         acc = np.mean(pred == labels.data) * 100
         pbar.set_description(f'Epoch {epoch} [TRAIN] loss = {loss.data[0]:.2f}, acc = {acc:.2f}')
+        # jt.display_memory_info()
 
 def evaluate(net, epoch, dataloader, args):
     total_acc = 0
@@ -135,7 +136,7 @@ def evaluate_kpconv(net, epoch, dataloader: KPConvLoader):
     total_time = 0.0
     for input_list in tqdm(dataloader, desc=f'Epoch {epoch} [Val]'):
         L = (len(input_list) - 5) // 4
-        labels = jt.array(input_list[4 * L + 1])
+        labels = jt.array(input_list[4 * L + 1]).squeeze(0)
         output = net(input_list)
 
         pred = np.argmax(output.data, axis=1)
@@ -178,24 +179,6 @@ def hook():
     outputs = net(batch)
     # jt.display_memory_info()
     exit(0)
-
-def hook_KPConv():
-    from networks.cls.blocks import KPConv
-    cfg = Modelnet40Config()
-    kpconv = KPConv(15, 3, 256, 256, 0.384, 0.8, modulated=True)
-    in1 = jt.zeros([457, 3])
-    in2 = jt.zeros([457, 3])
-    in3 = jt.zeros([457, 30])
-    in4 = jt.zeros([457, 256])
-    output = kpconv(in1, in2, in3, in4)
-    out = jt.ones([457])
-    other_params = [v for k, v in kpconv.named_parameters() if 'offset' not in k and 'running' not in k]
-    optimizer = nn.SGD(other_params, lr = cfg.learning_rate, momentum = cfg.momentum, weight_decay=cfg.weight_decay)
-    loss = nn.cross_entropy_loss(output, out)
-    optimizer.step(loss)
-    exit(0)
-
-
 
 if __name__ == '__main__':
     
@@ -255,8 +238,8 @@ if __name__ == '__main__':
         train_dataloader = ModelNet40(n_points=n_points, batch_size=batch_size, train=True, shuffle=True)
         val_dataloader = ModelNet40(n_points=n_points, batch_size=batch_size, train=False, shuffle=False)
     else:
-        # cfg.validation_size = 2000
-        # cfg.val_batch_num = 10
+        cfg.validation_size = 2000
+        cfg.val_batch_num = 10
         # train_dataloader = ModelNet40Dataset(cfg, train=True)
         # val_dataloader = ModelNet40Dataset(cfg, train=False)
         # train_sampler = ModelNet40Sampler(train_dataloader, balance_labels=True)
@@ -288,12 +271,32 @@ if __name__ == '__main__':
         if args.model == 'kpconv':
             train_kpconv(net, optimizer, epoch, train_dataloader)
             acc = evaluate_kpconv(net, epoch, val_dataloader)
+            train_dataloader.prepare_batch_indices()
+            val_dataloader.prepare_batch_indices()
             if epoch in cfg.lr_decays:
                 optimizer.lr *= cfg.lr_decays[epoch]
+            if cfg.saving:
+                # Get current state dict
+                checkpoint_directory = 'checkpoints/kpconv'
+                save_dict = {'epoch': epoch,
+                             'model_state_dict': net.state_dict(),
+                             'optimizer_state_dict': optimizer.state_dict(),
+                             'saving_path': cfg.saving_path}
+                checkpoint_path = join(checkpoint_directory, 'current_chkp.tar')
+                if acc > best_acc:
+                    checkpoint_path = join(checkpoint_directory, 'best_chkp.tar')
+
+                # Save current state of the network (for restoring purposes)
+                jt.save(save_dict, checkpoint_path)
+
+                # Save checkpoints occasionally
+                if (epoch + 1) % cfg.checkpoint_gap == 0:
+                    checkpoint_path = join(checkpoint_directory, 'chkp_{:04d}.tar'.format(epoch + 1))
+                    jt.save(save_dict, checkpoint_path)
         else:
             lr_scheduler.step(len(train_dataloader) * batch_size)
             train(net, optimizer, epoch, train_dataloader, args)
             acc = evaluate(net, epoch, val_dataloader, args)
 
         best_acc = max(best_acc, acc)
-        print(f'val acc={acc:.4f}, best={best_acc:.4f}')
+        print(f'[Epoch {epoch}] val acc={acc:.4f}, best={best_acc:.4f}')
