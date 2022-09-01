@@ -161,7 +161,7 @@ def create_3D_rotations(axis, angle):
     return np.reshape(R, (-1, 3, 3))
 
 class KPConvLoader(Dataset):
-    def __init__(self, config, train: bool, use_potential=True, balance_labels=False,num_workers=4):
+    def __init__(self, config, train: bool, use_potential=True, balance_labels=False, num_workers=4):
         super().__init__(num_workers=num_workers)
         """
         This dataset is small enough to be stored in-memory, so load all point clouds here
@@ -711,7 +711,6 @@ class KPConvLoader(Dataset):
 
         if self.use_potential:
             if self.balance_labels:
-
                 gen_indices = []
                 pick_n = self.epoch_n // self.num_classes + 1
                 for i, l in enumerate(self.label_values):

@@ -844,8 +844,9 @@ class ModelNet40CustomBatch:
         L = (len(input_list) - 5) // 4
         # print("input_list: ")
         for ind, i in enumerate(input_list):
-            input_list[ind] = i.squeeze(0)
             # print(input_list[ind].shape)
+            if i.shape[0] == 1:
+                input_list[ind] = input_list[ind].squeeze(0)
         # print("L: ", L)
         # Extract input tensors from the list of numpy array
         ind = 0
