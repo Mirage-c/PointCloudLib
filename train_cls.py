@@ -309,15 +309,15 @@ def classification_test(net, test_loader: KPConvLoader, config, num_votes=100):
         probs = np.vstack(probs)
         targets = np.hstack(targets)
         obj_inds = np.hstack(obj_inds)
-        print(obj_inds.shape)
+        # print(obj_inds.shape)
 
         if np.any(test_loader.input_labels[obj_inds] != targets):
             raise ValueError('wrong object indices')
 
         # Compute incremental average (predictions are always ordered)
         test_counts[obj_inds] += 1
-        print(test_counts.shape)
-        print(test_counts)
+        # print(test_counts.shape)
+        # print(test_counts)
         test_probs[obj_inds] += (probs - test_probs[obj_inds]) / (test_counts[obj_inds])
 
         # Save/Display temporary results
@@ -463,7 +463,6 @@ if __name__ == '__main__':
     for epoch in range(args.epochs):
         if args.model == 'kpconv':
             if not args.eval:
-                cfg.saving=False
                 train_kpconv(net, optimizer, epoch, train_dataloader)
                 acc = evaluate_kpconv(net, epoch, val_dataloader)
                 train_dataloader.prepare_batch_indices()

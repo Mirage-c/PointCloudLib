@@ -243,9 +243,12 @@ class KPConvLoader(Dataset):
                 self.epoch_n = config.epoch_steps * config.batch_num
             else:
                 self.epoch_n = self.num_models
+            self.epoch_n = self.num_models # 强制加上的
+            print("trainer, epoch_n = ", self.epoch_n)
         else:
             self.num_models = 2468
             self.epoch_n = min(self.num_models, config.validation_size * config.batch_num)
+            print("val, epoch_n = ", self.epoch_n)
 
         #############
         # Load models
