@@ -202,23 +202,23 @@ class KPConvLoader(Dataset):
         This dataset is small enough to be stored in-memory, so load all point clouds here
         """
         # Download
-        # self.path = BASE_DIR / 'data' / 'modelnet40_normal_resampled'
+        self.path = BASE_DIR / 'data' / 'modelnet40_normal_resampled'
 
-        # if not self.path.exists():
-        #     self.path.mkdir(parents=True)
-        #     self.url = (
-        #         "https://shapenet.cs.stanford.edu/media/modelnet40_normal_resampled.zip"
-        #     )
-        #     zipfile = self.path / '..' / 'modelnet40_normal_resampled.zip'
+        if not self.path.exists():
+            self.path.mkdir(parents=True)
+            self.url = (
+                "https://shapenet.cs.stanford.edu/media/modelnet40_normal_resampled.zip"
+            )
+            zipfile = self.path / '..' / 'modelnet40_normal_resampled.zip'
 
-        #     if not zipfile.exists():
-        #         subprocess.check_call([
-        #             'curl', self.url, '-o', str(zipfile)
-        #         ])
+            if not zipfile.exists():
+                subprocess.check_call([
+                    'curl', self.url, '-o', str(zipfile), '-k'
+                ])
 
-        #     subprocess.check_call([
-        #         'unzip', str(zipfile), '-d', str(self.path / '..')
-        #     ])
+            subprocess.check_call([
+                'unzip', str(zipfile), '-d', str(self.path / '..')
+            ])
 
 
 
@@ -276,7 +276,7 @@ class KPConvLoader(Dataset):
         self.ignored_labels = np.array([])
 
         # Dataset folder
-        self.path = '../Data/ModelNet40'
+        # self.path = '../Data/ModelNet40'
 
         # Type of task conducted on this dataset
         self_task = 'classification'
