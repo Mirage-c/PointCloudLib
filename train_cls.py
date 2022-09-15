@@ -437,7 +437,7 @@ if __name__ == '__main__':
         #     sampled_data = train_dataloader.__getitem__(sampled_idx)
         #     net(sampled_data)
         if not args.eval:
-            train_dataloader = KPConvLoader(cfg, train=True)
+            train_dataloader = KPConvLoader(cfg, train=True, num_workers=4)
         cfg.validation_size = 250
         cfg.val_batch_num = 10
         val_dataloader = KPConvLoader(cfg, train=False, num_workers=4)
